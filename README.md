@@ -3,7 +3,8 @@
 countinghouse step module: masks the secrets and personal data its rules recognise in text lines, before they reach a result; a reduction by patterns, not a guarantee.
 
 **Status: preview.** Runs on [countinghouse](https://github.com/mchen6/countinghouse)
-7.2 or later (unreleased at the time of writing). A step module of the countinghouse client packs: a `part`, loaded by a scenario and never listed to the model on its own.
+8.0 or later (unreleased; the release that carries the remote client and
+local mode). A step module of the countinghouse client packs: a `part`, loaded by a scenario and never listed to the model on its own.
 
 Part of the countinghouse client packs. Each package has its own repository; the family's design, plan and
 acceptance tests are in a repository that stays private until the first
@@ -17,7 +18,8 @@ npm test
 npm run validate   # packs the module and runs countinghouse-validate on the tarball
 ```
 
-Pure JavaScript, Node 22.16 or later, no native module. CI runs on
+Pure JavaScript, no native module. Node 24 or later today (the runtime's
+floor); 22.16 once countinghouse's floor shim lands (design). CI runs on
 Linux, macOS and Windows.
 
 ## Publishing
