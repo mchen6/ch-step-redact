@@ -26,15 +26,17 @@ function npmCli() {
 
 const root = path.join(__dirname, '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ch-validate-'));
+// The exit code is set, never process.exit()ed, so the finally below always
+// removes the temporary directory (process.exit inside try skips finally).
 try {
   const packed = spawnSync(process.execPath, [npmCli(), 'pack', '--json', '--pack-destination', tmp], {cwd: root, encoding: 'utf8'});
-  if (packed.status !== 0) { process.stderr.write(packed.stderr); process.exit(2); }
+  if (packed.status !== 0) { process.stderr.write(packed.stderr); process.exitCode = 2; return; }
   const tarball = path.join(tmp, JSON.parse(packed.stdout)[0].filename);
   const extracted = spawnSync('tar', ['-xzf', tarball, '-C', tmp], {encoding: 'utf8'});
-  if (extracted.status !== 0) { process.stderr.write(extracted.stderr); process.exit(2); }
+  if (extracted.status !== 0) { process.stderr.write(extracted.stderr); process.exitCode = 2; return; }
   const validator = require.resolve('countinghouse/bin/countinghouse-validate.js', {paths: [root]});
   const result = spawnSync(process.execPath, [validator, path.join(tmp, 'package')], {stdio: 'inherit'});
-  process.exit(result.status == null ? 2 : result.status);
+  process.exitCode = result.status == null ? 2 : result.status;
 } finally {
   fs.rmSync(tmp, {recursive: true, force: true});
 }
