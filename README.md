@@ -6,9 +6,8 @@ countinghouse step module: masks the secrets and personal data its rules recogni
 8.0 or later (unreleased; the release that carries the remote client and
 local mode). A step module of the countinghouse client packs: a `part`, loaded by a scenario and never listed to the model on its own.
 
-Part of the countinghouse client packs. Each package has its own repository; the family's design, plan and
-acceptance tests are in a repository that stays private until the first
-release.
+Part of the countinghouse client packs. Each package has its own repository; the family's design, plan and acceptance
+tests are in [ch-packs](https://github.com/mchen6/ch-packs) (public).
 
 ## Development
 
