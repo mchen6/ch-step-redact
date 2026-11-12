@@ -1,0 +1,15 @@
+{
+  "comment": "The example's cases (countinghouse examples/log-triage pii-redact, test/composition/11-log-triage-units.js), which must still hold. Every value is a documentation range or a well-known test number: 203.0.113.0/24, example.com, 555 numbers, the 4111 test card.",
+  "cases": [
+    ["user login email=alice.nguyen@example.com from 203.0.113.7", "user login email=<email> from <ipv4>"],
+    ["sms verification sent to +1-202-555-0143", "sms verification sent to <phone>"],
+    ["payment declined for card 4111 1111 1111 1111 order=4821", "payment declined for card <card> order=4821"],
+    ["outbound call header Authorization: Bearer tk_demo_0000000000000000000000000000", "outbound call header Authorization: <token>"],
+    ["from 203.0.113.7 to 203.0.113.42 cc bob.ortiz@example.com", "from <ipv4> to <ipv4> cc <email>"],
+    ["2026-09-01T00:00:12.345Z WARN slow query took 8123ms table=orders", "2026-09-01T00:00:12.345Z WARN slow query took 8123ms table=orders"],
+    ["GET /invite?to=alice@example.com%20bob@example.org", "GET /invite?to=<email><email>"],
+    ["alice@example.com_bob@example.org", "<email><email>"],
+    ["bad address alice@localhost here", "bad address alice@localhost here"],
+    ["", ""]
+  ]
+}

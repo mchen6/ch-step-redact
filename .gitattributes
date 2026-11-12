@@ -1,0 +1,5 @@
+# Text is checked out with LF on every system, so tests and fixtures see the
+# same bytes on Windows runners. Log fixtures are kept byte for byte: one of
+# them holds CRLF line endings and a BOM on purpose.
+* text=auto eol=lf
+*.log -text

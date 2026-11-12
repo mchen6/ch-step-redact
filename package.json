@@ -1,0 +1,37 @@
+{
+  "name": "@countinghouse/ch-step-redact",
+  "version": "0.1.0",
+  "description": "countinghouse step module: masks secrets and personal data in text lines before any line can reach a result.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mchen6/ch-step-redact.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.16"
+  },
+  "files": [
+    "api.json",
+    "schema.json",
+    "handlers/",
+    "lib/"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "validate": "node scripts/validate.js"
+  },
+  "countinghouse": {
+    "role": "part"
+  },
+  "devDependencies": {
+    "countinghouse": "git+https://github.com/mchen6/countinghouse.git#9e1cdb591f470ea502f060ed70ce244bdab633fe"
+  },
+  "allowScripts": {
+    "dtrace-provider": false,
+    "msgpackr-extract": false,
+    "sqlite3": false
+  }
+}

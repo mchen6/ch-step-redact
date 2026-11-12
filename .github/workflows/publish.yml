@@ -1,0 +1,65 @@
+name: publish
+
+# Publishes @countinghouse/ch-step-redact to npm under trusted publishing (OIDC):
+# this repository holds no npm token and nobody types a 2FA code. GitHub hands
+# the job a short-lived identity token, npm checks it against the trusted
+# publisher configured on the package (owner mchen6, repository ch-step-redact,
+# workflow file publish.yml) and attaches provenance. The one-time
+# configuration is in README.md, "Publishing".
+#
+# Runs when a tag v<version> is pushed to a commit on main whose package.json
+# carries exactly that version.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write   # the OIDC token npm trusts; the only credential involved
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The commit is on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_SHA is not on main"; exit 1; }
+
+      - name: The tag names package.json's version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          [ "${GITHUB_REF_NAME}" = "v${version}" ] || { echo "::error::tag ${GITHUB_REF_NAME} but package.json says ${version}"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: npm supports trusted publishing (11.5.1 or later)
+        run: |
+          node -e "
+            const [a, b, c] = require('child_process').execSync('npm --version').toString().trim().split('.').map(Number);
+            const ok = a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1)));
+            if (!ok) { console.error('npm ' + [a, b, c].join('.') + ' is older than 11.5.1'); process.exit(1); }
+            console.log('npm ' + [a, b, c].join('.'));
+          "
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Test
+        run: npm test
+
+      - name: What the tarball holds
+        run: npm pack --dry-run
+
+      - name: Publish
+        run: npm publish --access public

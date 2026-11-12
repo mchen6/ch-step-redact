@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "#/",
+  "type": "object",
+  "redactService": {
+    "redact": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "lines": {
+            "title": "lines to mask",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "lines": {
+            "title": "the lines with every match replaced by a tag; a private key block becomes one line",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "counts": {
+            "title": "matches replaced, per type",
+            "type": "object",
+            "properties": {
+              "bearerToken": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "githubToken": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "awsKey": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "apiKey": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "secret": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "privateKey": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "jwt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "basicAuthUrl": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "email": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "ipv4": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "card": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "phone": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "bearerToken",
+              "githubToken",
+              "awsKey",
+              "apiKey",
+              "secret",
+              "privateKey",
+              "jwt",
+              "basicAuthUrl",
+              "email",
+              "ipv4",
+              "card",
+              "phone"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "lines",
+          "counts"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "fault": {
+    "redactService": {
+      "redact": {
+        "fault": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "title": "specific error reason",
+              "type": "string"
+            },
+            "info": {
+              "title": "detailed error info",
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

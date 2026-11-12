@@ -1,0 +1,20 @@
+{
+  "device": {
+    "friendlyName": "ch-step-redact",
+    "manufacturer": "ch-packs",
+    "modelDescription": "Step module of the ch-packs family: masks secrets and personal data in the text lines it is handed, so that no token, key or address in a log line can reach a scenario's result. A pure function of its input: no disk, no network, no state. Its patterns are regular expressions; it is a safety net applied to everything a scenario returns, not a guarantee.",
+    "serviceList": {
+      "urn:ch-packs:serviceID:redactService": {
+        "actionList": [
+          {
+            "name": "redact",
+            "description": "Masks the lines you supply and returns them in the same order, with every match replaced whole by a tag: authorization header credentials, Bearer, Basic and token (<token>), GitHub tokens (<githubToken>), AWS access key ids and secret access keys (<awsKey>), Slack, Stripe, Google and npm keys (<apiKey>), the value of a password, secret, token or API key assigned with = (or with : as a key), a quoted value whole (<secret>, the name kept), private key blocks, PGP's included (<privateKey>, one line for the whole block, so the line count can change), JWTs (<jwt>), credentials in a URL: a password, or a user long enough to be a token (://<basicAuth>@), e-mail addresses (<email>), IPv4 addresses (<ipv4>), card numbers that pass the Luhn check (<card>) and phone numbers (<phone>). Also returns how many matches of each type were replaced. A count of zero is not evidence that the text holds no secret or personal data: the patterns catch the shapes listed, nothing else.",
+            "input": {"schema": "/redactService/redact/input"},
+            "output": {"schema": "/redactService/redact/output"},
+            "fault": {"schema": "/fault/redactService/redact/fault"}
+          }
+        ]
+      }
+    }
+  }
+}
