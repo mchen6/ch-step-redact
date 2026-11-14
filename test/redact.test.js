@@ -252,7 +252,7 @@ test('every line given back is at most 500 characters, masked before it is cut',
   assert.strictEqual(schema[svc].redact.output.properties.lines.items.maxLength, 500);
 
   const {output} = await redact({lines: [`${'y'.repeat(25000)} token=${token}`]});
-  assert.strictEqual(output.lines[0], '…', 'a line over 20000 is cut, not refused (back to a boundary: none in its first 20000)');
+  assert.strictEqual(output.lines[0], `(a line of ${25000 + 1 + token.length + 6} characters, omitted)`, 'a line over 20000 is omitted whole, not refused');
 });
 
 test('a cut never splits a surrogate pair', () => {
@@ -261,16 +261,24 @@ test('a cut never splits a surrogate pair', () => {
   assert.strictEqual(cutTo(`${'a'.repeat(497)}\u{1F600}bb`, 500), `${'a'.repeat(497)}\u{1F600}…`);
 });
 
-test('a token split at the 20000 cut is not shown: the cut goes back to the last character no secret holds (the reviewer\'s case)', () => {
-  const jwt = `eyJhbGciOiJIUzI1NiJ9.eyJ${'a'.repeat(19470)}.${'s'.repeat(20)}`;
-  const token = `ghp_${'A1b2C3d4E5'.repeat(4)}`;
-  const pad = 'x'.repeat(20000 - jwt.length - 1 - 10);   // the token starts 10 characters before the cut
-  const line = `${jwt} ${pad} ${token} tail`;
-  assert.ok(line.indexOf(token) < 20000 && line.indexOf(token) + token.length > 20000, 'the token straddles the cut');
-  const out = redactLines([line]).lines[0];
-  assert.ok(!/ghp_/.test(out), out);
-  assert.ok(out.length <= 500);
-  const {cutAtBoundary} = require('../lib/rules');
-  assert.strictEqual(cutAtBoundary(`${'a'.repeat(30)}`, 20), '…', 'no boundary: nothing kept');
-  assert.strictEqual(cutAtBoundary(`ab cd${'e'.repeat(30)}`, 20), 'ab …');
-});
+// A line over 20000 is omitted whole (the reviewer, round 2): no cut, so no
+// secret's head is left, whatever quoting or spaces it has.
+const LONG_JWT = `eyJhbGciOiJIUzI1NiJ9.eyJ${'a'.repeat(19470)}.${'s'.repeat(20)}`;
+const across = (secret) => {
+  // the secret starts a few characters before the 20000th
+  const pad = 'x'.repeat(Math.max(0, 20000 - LONG_JWT.length - 2 - 6));
+  return `${LONG_JWT} ${pad} ${secret} tail`;
+};
+for (const [label, secret, leak] of [
+  ['a ghp_ token', `ghp_${'A1b2C3d4E5'.repeat(4)}`, /ghp_/],
+  ['a quoted password with spaces', 'password="Zq9 Wx7 Kp3 Mn5 Rt8"', /Zq9|Wx7/],
+  ['a JSON password', '{"password": "Zq9 Wx7 Kp3 Mn5 Rt8"}', /Zq9|Wx7/],
+  ['a single-quoted API key', "API_KEY='Zq9 Wx7 Kp3 Mn5 Rt8'", /Zq9|Wx7/]]) {
+  test(`a line over 20000 is omitted whole: nothing of ${label} across the 20000th character is kept`, () => {
+    const line = across(secret);
+    assert.ok(line.length > 20000 && line.indexOf(secret) < 20000, 'the secret starts before the 20000th character');
+    const out = redactLines([line]).lines[0];
+    assert.strictEqual(out, `(a line of ${line.length} characters, omitted)`);
+    assert.ok(!leak.test(out));
+  });
+}
