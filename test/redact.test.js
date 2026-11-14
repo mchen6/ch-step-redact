@@ -239,3 +239,46 @@ test('the secret rule stays linear on long joined names', () => {
   const ms = Date.now() - start;
   assert.ok(ms < 2000, `took ${ms} ms`);
 });
+
+test('every line given back is at most 500 characters, masked before it is cut', async () => {
+  const token = `ghp_${'A1b2C3d4E5'.repeat(4)}`;
+  const line = `${'x'.repeat(490)} token=${token} and more`;
+  const out = redactLines([line, 'short']);
+  assert.strictEqual(out.lines[1], 'short');
+  assert.ok(out.lines[0].length <= 500, String(out.lines[0].length));
+  assert.ok(!out.lines[0].includes('ghp_A1b2'), 'the secret across the cut is masked, not half shown');
+  const schema = require('../schema.json');
+  const svc = Object.keys(schema).find((k) => schema[k] != null && schema[k].redact != null);
+  assert.strictEqual(schema[svc].redact.output.properties.lines.items.maxLength, 500);
+
+  const {output} = await redact({lines: [`${'y'.repeat(25000)} token=${token}`]});
+  assert.strictEqual(output.lines[0], `(a line of ${25000 + 1 + token.length + 6} characters, omitted)`, 'a line over 20000 is omitted whole, not refused');
+});
+
+test('a cut never splits a surrogate pair', () => {
+  const {cutTo} = require('../lib/rules');
+  assert.strictEqual(cutTo(`${'a'.repeat(498)}\u{1F600}b`, 500), `${'a'.repeat(498)}…`);
+  assert.strictEqual(cutTo(`${'a'.repeat(497)}\u{1F600}bb`, 500), `${'a'.repeat(497)}\u{1F600}…`);
+});
+
+// A line over 20000 is omitted whole (the reviewer, round 2): no cut, so no
+// secret's head is left, whatever quoting or spaces it has.
+const LONG_JWT = `eyJhbGciOiJIUzI1NiJ9.eyJ${'a'.repeat(19470)}.${'s'.repeat(20)}`;
+const across = (secret) => {
+  // the secret starts a few characters before the 20000th
+  const pad = 'x'.repeat(Math.max(0, 20000 - LONG_JWT.length - 2 - 6));
+  return `${LONG_JWT} ${pad} ${secret} tail`;
+};
+for (const [label, secret, leak] of [
+  ['a ghp_ token', `ghp_${'A1b2C3d4E5'.repeat(4)}`, /ghp_/],
+  ['a quoted password with spaces', 'password="Zq9 Wx7 Kp3 Mn5 Rt8"', /Zq9|Wx7/],
+  ['a JSON password', '{"password": "Zq9 Wx7 Kp3 Mn5 Rt8"}', /Zq9|Wx7/],
+  ['a single-quoted API key', "API_KEY='Zq9 Wx7 Kp3 Mn5 Rt8'", /Zq9|Wx7/]]) {
+  test(`a line over 20000 is omitted whole: nothing of ${label} across the 20000th character is kept`, () => {
+    const line = across(secret);
+    assert.ok(line.length > 20000 && line.indexOf(secret) < 20000, 'the secret starts before the 20000th character');
+    const out = redactLines([line]).lines[0];
+    assert.strictEqual(out, `(a line of ${line.length} characters, omitted)`);
+    assert.ok(!leak.test(out));
+  });
+}

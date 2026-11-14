@@ -8,7 +8,7 @@
         "type": "object",
         "properties": {
           "lines": {
-            "title": "lines to mask",
+            "title": "lines to mask; one over 20000 characters is cut to it first",
             "type": "array",
             "items": {
               "type": "string"
@@ -24,10 +24,11 @@
         "type": "object",
         "properties": {
           "lines": {
-            "title": "the lines with every match replaced by a tag; a private key block becomes one line",
+            "title": "the lines with every match replaced by a tag, then cut to 500 characters with …; a private key block becomes one line",
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 500
             }
           },
           "counts": {
