@@ -252,11 +252,25 @@ test('every line given back is at most 500 characters, masked before it is cut',
   assert.strictEqual(schema[svc].redact.output.properties.lines.items.maxLength, 500);
 
   const {output} = await redact({lines: [`${'y'.repeat(25000)} token=${token}`]});
-  assert.strictEqual(output.lines[0], `${'y'.repeat(499)}…`, 'a line over 20000 is cut, not refused');
+  assert.strictEqual(output.lines[0], '…', 'a line over 20000 is cut, not refused (back to a boundary: none in its first 20000)');
 });
 
 test('a cut never splits a surrogate pair', () => {
   const {cutTo} = require('../lib/rules');
   assert.strictEqual(cutTo(`${'a'.repeat(498)}\u{1F600}b`, 500), `${'a'.repeat(498)}…`);
   assert.strictEqual(cutTo(`${'a'.repeat(497)}\u{1F600}bb`, 500), `${'a'.repeat(497)}\u{1F600}…`);
+});
+
+test('a token split at the 20000 cut is not shown: the cut goes back to the last character no secret holds (the reviewer\'s case)', () => {
+  const jwt = `eyJhbGciOiJIUzI1NiJ9.eyJ${'a'.repeat(19470)}.${'s'.repeat(20)}`;
+  const token = `ghp_${'A1b2C3d4E5'.repeat(4)}`;
+  const pad = 'x'.repeat(20000 - jwt.length - 1 - 10);   // the token starts 10 characters before the cut
+  const line = `${jwt} ${pad} ${token} tail`;
+  assert.ok(line.indexOf(token) < 20000 && line.indexOf(token) + token.length > 20000, 'the token straddles the cut');
+  const out = redactLines([line]).lines[0];
+  assert.ok(!/ghp_/.test(out), out);
+  assert.ok(out.length <= 500);
+  const {cutAtBoundary} = require('../lib/rules');
+  assert.strictEqual(cutAtBoundary(`${'a'.repeat(30)}`, 20), '…', 'no boundary: nothing kept');
+  assert.strictEqual(cutAtBoundary(`ab cd${'e'.repeat(30)}`, 20), 'ab …');
 });
