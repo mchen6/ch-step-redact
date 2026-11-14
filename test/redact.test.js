@@ -239,3 +239,24 @@ test('the secret rule stays linear on long joined names', () => {
   const ms = Date.now() - start;
   assert.ok(ms < 2000, `took ${ms} ms`);
 });
+
+test('every line given back is at most 500 characters, masked before it is cut', async () => {
+  const token = `ghp_${'A1b2C3d4E5'.repeat(4)}`;
+  const line = `${'x'.repeat(490)} token=${token} and more`;
+  const out = redactLines([line, 'short']);
+  assert.strictEqual(out.lines[1], 'short');
+  assert.ok(out.lines[0].length <= 500, String(out.lines[0].length));
+  assert.ok(!out.lines[0].includes('ghp_A1b2'), 'the secret across the cut is masked, not half shown');
+  const schema = require('../schema.json');
+  const svc = Object.keys(schema).find((k) => schema[k] != null && schema[k].redact != null);
+  assert.strictEqual(schema[svc].redact.output.properties.lines.items.maxLength, 500);
+
+  const {output} = await redact({lines: [`${'y'.repeat(25000)} token=${token}`]});
+  assert.strictEqual(output.lines[0], `${'y'.repeat(499)}…`, 'a line over 20000 is cut, not refused');
+});
+
+test('a cut never splits a surrogate pair', () => {
+  const {cutTo} = require('../lib/rules');
+  assert.strictEqual(cutTo(`${'a'.repeat(498)}\u{1F600}b`, 500), `${'a'.repeat(498)}…`);
+  assert.strictEqual(cutTo(`${'a'.repeat(497)}\u{1F600}bb`, 500), `${'a'.repeat(497)}\u{1F600}…`);
+});
