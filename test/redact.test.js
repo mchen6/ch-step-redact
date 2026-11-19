@@ -2,9 +2,12 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
-require('./support');
 const {redactLines, TYPES} = require('../lib/rules');
-const redact = require('../handlers/redactService/redact');
+const {CountinghouseError} = require('countinghouse/lib/countinghouse-error');
+// the handler as the runtime calls it: (input, ctx), ctx.error the runtime's
+const ctx = {error: (code, message, details) => CountinghouseError.module(code, message, details)};
+const handler = require('../handlers/redactService/redact');
+const redact = Object.assign((input) => handler(input, ctx), handler);
 const {cases} = require('./fixtures/lines.json');
 
 // Built at run time so no fixture file holds a string a secret scanner flags.
@@ -112,7 +115,7 @@ test('handler validates input and returns counts for every type', async () => {
   assert.strictEqual(output.counts.githubToken, 1);
   assert.strictEqual(output.counts.email, 1);
   for (const bad of [{}, {lines: 'x'}, {lines: ['ok', 7]}, null]) {
-    await assert.rejects(redact(bad), (err) => err.code === 'ARGUMENTS_INVALID', JSON.stringify(bad));
+    await assert.rejects(redact(bad), (err) => err.code === 'INPUT_REJECTED', JSON.stringify(bad));
   }
 });
 
