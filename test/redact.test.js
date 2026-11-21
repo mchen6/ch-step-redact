@@ -818,3 +818,19 @@ test('F6a medium 2: a quote right after a bracket\'s close is no end; an unclose
   const r = redactLines(lines);
   assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
 });
+
+test('basic-auth URL: a user part holding @, and a password holding /, are masked to the authority\'s last @', () => {
+  const pw = ['hunter', '2'].join('');
+  const lines = [`postgres://svc@corp.com:${pw}${FAKE}@db:5432/app`, `https://ci@corp.com:Passw0rd${FAKE}@localhost/x`, `https://u:pa/ss${FAKE}@host.com`];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  assert.strictEqual(r.lines[0], 'postgres://<basicAuth>@db:5432/app');
+  // (a port and a path with an @ after it is no password: the URL stays)
+  assert.deepStrictEqual(redactLines(['npm http fetch GET 200 https://registry.npmjs.org:443/@babel/core 12ms']).lines, ['npm http fetch GET 200 https://registry.npmjs.org:443/@babel/core 12ms']);
+});
+
+test('NAME_END: text ending in a secret\'s name, Bearer or Basic (for ch-step-log-clean)', () => {
+  const {NAME_END} = require('../lib/rules');
+  for (const t of ['--password', 'x Bearer', 'basic', 'DB_PASSWORD', 'api_key', 'auth', 'pwd', 'X-Auth-Token', 'credentials']) assert.ok(NAME_END.test(t), t);
+  for (const t of ['passwordless_mode_x', 'hello', 'tokenizer', 'abc123']) assert.ok(!NAME_END.test(t), t);
+});
