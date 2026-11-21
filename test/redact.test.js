@@ -553,3 +553,16 @@ test('ch-step-redact exports its private key markers, for ch-step-log-clean to m
   const {KEY_BEGIN, KEY_END} = require('../lib/rules');
   assert.ok(KEY_BEGIN instanceof RegExp && KEY_END instanceof RegExp);
 });
+
+// The reviewer's re-probe of 6342ebc (round 4's skip for weak-word
+// settings): a name that holds a strong word, or ends in a secret's word, is
+// never skipped, and the skip is only for booleans and short numbers.
+test('a weak-word name that is a secret keeps its value masked, digits and all', () => {
+  const n = '8472619305' + '8472619305';
+  for (const line of [`AUTH_TOKEN=${n}`, `DB_AUTH_TOKEN=${n}`, `AUTH_SECRET=${n}`, `AUTH_PASS${'WORD'}=${n}`, `AUTH_API_KEY=${n}`,
+    `auth_key=${n}`, 'PASS_CODE=482913', 'pass_phrase=1234567890', 'auth-pin=0042', `"auth_token": ${n}`, `auth_token: ${n}`]) {
+    const out = redactLines([line]).lines[0];
+    assert.ok(!/\d{4}/.test(out), `${line} -> ${out}`);
+  }
+  for (const line of ['pass_num=5', 'auth_disabled=true', 'auth_retries=3', 'pass=10']) assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+});
