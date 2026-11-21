@@ -597,3 +597,14 @@ test('A-redact-2: the forms and shapes the boundary probe found leaking are mask
     assert.deepStrictEqual(redactLines([line]).lines, [line], line);
   }
 });
+
+// The reviewer's ruling on A-redact-2: a tail after an earlier tag is kept
+// only when it looks like a URL's host; otherwise it is masked too.
+test('A-redact-2: a tail after a tag is kept only as a URL host', () => {
+  const r = redactLines([`pass${'word'}=<basicAuth>@S3CRT` + 'value']);
+  assert.ok(!r.lines[0].includes('S3CRT'), r.lines[0]);
+  const GH = 'ghp_' + 'a1B2'.repeat(9);
+  for (const host of ['github.com/o/r.git', 'github.com', 'localhost:8080/x', 'git.example.invalid:443']) {
+    assert.deepStrictEqual(redactLines([`x-access-token:${GH}@${host}`]).lines, [`x-access-token:<githubToken>@${host}`], host);
+  }
+});
