@@ -511,8 +511,10 @@ test('medium round 3: secret names that start with a weak word, and AWS keys wit
   const k = 'wJa/rXU/nFE/I/K7MDENG/bPxRfiCY' + 'EXAMPLEKEY';
   assert.deepStrictEqual(redactLines([`Using key ${k}.`]).lines, ['Using key <awsKey>.']);
 });
-test('medium round 3: a backslash in a single-quoted header is literal', () => {
-  assert.deepStrictEqual(redactLines([`curl -H 'X-Api-${'Key'}: a\\' -H 'X-Other: plain'`]).lines, [`curl -H 'X-Api-${'Key'}: <secret>' -H 'X-Other: plain'`]);
+// (A-redact-2, the reviewer's leftover: a shell value ending in a backslash
+// before its quote now fails closed, to the next quote)
+test('medium round 3: a backslash in a single-quoted header ends nothing early: fails closed to the next quote', () => {
+  assert.deepStrictEqual(redactLines([`curl -H 'X-Api-${'Key'}: a\\' -H 'X-Other: plain'`]).lines, [`curl -H 'X-Api-${'Key'}: <secret>'X-Other: plain'`]);
 });
 
 // The medium's fourth round: leaks the third round's boundaries opened, each
@@ -565,4 +567,33 @@ test('a weak-word name that is a secret keeps its value masked, digits and all',
     assert.ok(!/\d{4}/.test(out), `${line} -> ${out}`);
   }
   for (const line of ['pass_num=5', 'auth_disabled=true', 'auth_retries=3', 'pass=10']) assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+});
+
+// A-redact-2 (the reviewer's follow-up, release 1): the pattern additions
+// from the reviewer's boundary probe. Each case must lose its sentinel.
+test('A-redact-2: the forms and shapes the boundary probe found leaking are masked', () => {
+  const S = 'S3CRT' + 'value';
+  const A = 'aB3dE5gH7jK9mN1pQ2rS4tU6vW8xY0zA1b2C';
+  const cases = [
+    `docker login -p ${S}`, `sshpass -p ${S} ssh x`, `curl -u user:${S} https://x.invalid`, `curl --user user:${S} https://x.invalid`,
+    `echo X-Api-${'Key'}: ${S}`, `{ Author${'ization'}: '${S}RawToken' }`, `author${'ization'}=${S}`, `echo config: pass${'word'}: ${S}`,
+    `tokens=${S}`, `secrets=${S}`, `passphrase=${S}`, `signing_key=${S}`, `access_key=${S}`, `encryption_key=${S}`, `master_key=${S}`,
+    'b3BlbnNzaC1rZXktdjE' + 'AAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW' + S,
+    `hf_${S}${A}`, `dop_v1_${S}${A}${A}`, `AccountKey=${S}${A}${A}==`,
+    `DefaultEndpointsProtocol=https;AccountName=x;AccountKey=${S}${A}==;EndpointSuffix=core.windows.net`,
+    `SharedAccessSignature=sv=2020&sig=${S}${A}`, `https://x.invalid/?sig=${S}&se=2026`
+  ];
+  for (const line of cases) {
+    const out = redactLines([line]).lines[0];
+    assert.ok(!out.includes('S3CRT'), `${line} -> ${out}`);
+  }
+  // the reviewer's two leftovers from #4, failing closed
+  for (const line of [`curl -H 'X-Api-${'Key'}: abc\\' ${S}'`, `"X-Api-${'Key'}": 1e5, "x": "${S}"`]) {
+    const out = redactLines([line]).lines[0];
+    assert.ok(!out.includes('S3CRT'), `${line} -> ${out}`);
+  }
+  // what triage needs stays
+  for (const line of ['Invalid token: abc', 'missing secret: FOO', 'tokens=3', 'max_tokens=KEEP', 'num_tokens=KEEP', 'Unexpected token: ) KEEP', 'Cache key: node-cache-Linux-npm-0123456789abcdef KEEP', 'docker run -p 8080:80 img', 'Run actions/checkout@v4 KEEP']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
 });
