@@ -834,3 +834,12 @@ test('NAME_END: text ending in a secret\'s name, Bearer or Basic (for ch-step-lo
   for (const t of ['--password', 'x Bearer', 'basic', 'DB_PASSWORD', 'api_key', 'auth', 'pwd', 'X-Auth-Token', 'credentials']) assert.ok(NAME_END.test(t), t);
   for (const t of ['passwordless_mode_x', 'hello', 'tokenizer', 'abc123']) assert.ok(!NAME_END.test(t), t);
 });
+
+test('a password after an address and a colon, before the next @, is masked (svc@corp.com:<pw>@db:5432/app)', () => {
+  const pw = ['hunter', '2'].join('') + FAKE;
+  const r = redactLines([`Error: svc@corp.com:${pw}@db:5432/app`, `connect ci@corp.com:${pw}@localhost failed`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  assert.strictEqual(r.lines[0], 'Error: <email>:<basicAuth>@db:5432/app');
+  // (an address then a colon and words, with no @ after: prose, kept)
+  assert.deepStrictEqual(redactLines(['mail bob@corp.com: the build failed']).lines, ['mail <email>: the build failed']);
+});
