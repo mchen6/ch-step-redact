@@ -323,3 +323,38 @@ test('an assigned secret is masked to the end of its value: no tail after , ; " 
   assert.deepStrictEqual(tagged.lines, [`${name}=<githubToken>`]);
   assert.deepStrictEqual([tagged.counts.githubToken, tagged.counts.secret], [1, 0]);
 });
+
+// The reviewer's high, 3 (missed names). Values built at run time.
+test('secrets under the names and forms the reviewer listed are masked; their look-alikes are not', () => {
+  const v = 's3cr3t' + 'VALUEabc123';
+  const masked = [
+    [`{"access${'Token'}":"${v}"}`, `{"access${'Token'}":"<secret>"}`],
+    [`client${'Secret'}=${v}`, `client${'Secret'}=<secret>`],
+    [`api${'Token'}=${v}`, `api${'Token'}=<secret>`],
+    [`PGPASS${'WORD'}=${v} psql`, `PGPASS${'WORD'}=<secret> psql`],
+    [`MYSQL_${'PWD'}=${v}`, `MYSQL_${'PWD'}=<secret>`],
+    [`ACCESS${'TOKEN'}=${v}`, `ACCESS${'TOKEN'}=<secret>`],
+    [`pwd=${v}`, 'pwd=<secret>'],
+    [`pass=${v}`, 'pass=<secret>'],
+    [`auth=${v}`, 'auth=<secret>'],
+    [`credentials=${v}`, 'credentials=<secret>'],
+    [`private_${'key'}=${v}`, `private_${'key'}=<secret>`],
+    [`//npm.pkg.invalid/:_pass${'word'}=${v}`, `//npm.pkg.invalid/:_pass${'word'}=<secret>`],
+    [`//npm.pkg.invalid/:_auth=${v}`, '//npm.pkg.invalid/:_auth=<secret>'],
+    [`//npm.pkg.invalid/:_auth${'Token'}=${v}`, `//npm.pkg.invalid/:_auth${'Token'}=<secret>`],
+    [`docker login -u me --pass${'word'} ${v}`, `docker login -u me --pass${'word'} <secret>`],
+    [`mysql -uroot -p${v} db`, 'mysql -uroot -p<secret> db'],
+    [`curl -H "X-Api-${'Key'}: ${v}" https://x.invalid`, `curl -H "X-Api-${'Key'}: <secret>" https://x.invalid`],
+    [`curl -H "Author${'ization'}: ${v}xyz" https://x.invalid`, `curl -H "Author${'ization'}: <secret>" https://x.invalid`],
+    [`Set-Cookie: session=${v}; Path=/`, 'Set-Cookie: <secret>'],
+    [`Cookie: sid=${v}`, 'Cookie: <secret>']
+  ];
+  for (const [line, want] of masked) {
+    const r = redactLines([line]);
+    assert.deepStrictEqual(r.lines, [want], line);
+    assert.strictEqual(r.counts.secret, 1, `${line}: counted once`);
+  }
+  for (const line of ['max_tokens: 5', 'Unexpected token: )', 'bypass=1', 'author: someone', 'docker run -p 8080:80 img', 'docker run -p8080:80 img', 'tokens=3']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+});
