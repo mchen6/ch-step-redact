@@ -750,3 +750,30 @@ test('R1 medium 2: a header value in escaped quotes closes only where a value ca
   const r = redactLines([`{\\"Cookie\\":\\"a\\"sid=${FAKE}\\"}`, `msg="headers { Cookie: \\"sid=${FAKE}\\" }"`]);
   assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
 });
+
+// The reviewer's high on #11 (F4, F6).
+test('F4: a secret flag with = and spaces masks its value, not the =', () => {
+  const r = redactLines([`##[error]--password = ${FAKE}`, `login --password = ${FAKE}`, `login --token =${FAKE}`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
+
+test('F6a: a secret-named key with an array or object value is masked whole, plain or escaped', () => {
+  const two = `${FAKE} second ${FAKE}`;
+  const lines = [
+    `Error: body {"password": ["${two}"], "n": 1}`,
+    `Error: body {"api_key":{"inner":"${two}"},"user":"bob"}`,
+    `Error: body {\\"client_secret\\":[\\"${two}\\"],\\"n\\":1}`,
+    `Error: body {\\"token\\":{\\"inner\\":\\"a ] } ${two}\\"}}`,
+    `Error: body {"secret": [ "${two}" `
+  ];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  // (to its own close bracket: what follows stays)
+  assert.strictEqual(r.lines[0], 'Error: body {"password": <secret>, "n": 1}');
+  assert.ok(r.lines[1].endsWith(',"user":"bob"}'), r.lines[1]);
+});
+
+test('F6b: after a marker the prose exemption keeps only an unquoted value', () => {
+  const r = redactLines([`##[debug]secret: "${FAKE} more words"`, `##[debug]token: '${FAKE} x'`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
