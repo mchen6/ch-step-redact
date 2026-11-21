@@ -302,3 +302,24 @@ test('a private key block whose BEGIN line is over IN_MAX characters: its body n
   assert.ok(!r2.lines.some((l) => l.includes(KEY_BODY)), JSON.stringify(r2.lines));
   assert.strictEqual(r2.lines[r2.lines.length - 1], 'after MII', 'the block closed at the long line');
 });
+
+// The reviewer's high, 2 (partial): an unquoted value stopped at , ; " ',
+// leaving the tail in view while the count said masked, and a value starting
+// with < was left whole. An unquoted value runs to whitespace or the line's
+// end; a value left alone is one an earlier rule's tags make up entirely.
+test('an assigned secret is masked to the end of its value: no tail after , ; " \' and no untagged value starting with <', () => {
+  const name = 'DB_PASS' + 'WORD';
+  for (const sep of [';', ',', '"', "'"]) {
+    const r = redactLines([`${name}=abc${sep}s3cr3tTAIL next`]);
+    assert.deepStrictEqual(r.lines, [`${name}=<secret> next`], sep);
+    assert.strictEqual(r.counts.secret, 1);
+  }
+  const lt = redactLines([`${name}=<s3cr3tVALUE`]);
+  assert.deepStrictEqual(lt.lines, [`${name}=<secret>`]);
+  const ltq = redactLines([`${name}="<s3cr3tVALUE"`]);
+  assert.deepStrictEqual(ltq.lines, [`${name}="<secret>"`]);
+  // (a value an earlier rule already tagged stays, counted once)
+  const tagged = redactLines([`${name}=` + GHP]);
+  assert.deepStrictEqual(tagged.lines, [`${name}=<githubToken>`]);
+  assert.deepStrictEqual([tagged.counts.githubToken, tagged.counts.secret], [1, 0]);
+});
