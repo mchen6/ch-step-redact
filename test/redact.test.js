@@ -473,7 +473,9 @@ test('medium round 2: mysql -p runs to whitespace; a long quoted value is masked
     [`secret="${'x'.repeat(4100)}TAILSECRET"`, 'secret="<secret>"'],
     [`{"${ck}": "a=b\\"; session=SECRETVAL"}`, `{"${ck}": "<secret>"}`],
     [`2026-11-20T10:00:00.1234567Z > ${ck}: session=abc123`, `2026-11-20T10:00:00.1234567Z > ${ck}: <secret>`],
-    [`{"X-Api-${'Key'}": abc, "other": 1}`, `{"X-Api-${'Key'}": <secret>, "other": 1}`],
+    // (an unquoted value that is no JSON literal runs to the line's end: the
+    // medium's third round, fail closed)
+    [`{"X-Api-${'Key'}": abc, "other": 1}`, `{"X-Api-${'Key'}": <secret>}`],
     [`{"pass${'word'}": "ab\\\\"}`, `{"pass${'word'}": "<secret>"}`]
   ]) assert.deepStrictEqual(redactLines([line]).lines, [want], line.slice(0, 80));
 });
@@ -485,4 +487,30 @@ test('medium round 2: a YAML block indicator is no value; a bare key body ends b
   for (const line of ['  pass: 10   ', 'pass_count=10 auth_mode=none auth_type=basic', 'git push --no-auth origin']) {
     assert.deepStrictEqual(redactLines([line]).lines, [line], line);
   }
+});
+
+// The medium's third round: leaks the second round's narrowing opened
+// (fail closed where a leak and over-masking conflict). Built at run time.
+test('medium round 3: an Anthropic or OpenAI key whole; a JSON Authorization or Cookie value whole; a narrow-wrapped key body whole', () => {
+  const b = 'aB3dE5gH7jK9mN1pQ2rS4tU6vW8xY0zA1b2C3d4E';
+  assert.deepStrictEqual(redactLines([`key sk-ant-api03-ab_${b}-tailSECRETtailSECRETtail99AAz-AA`]).lines, ['key <apiKey>']);
+  assert.deepStrictEqual(redactLines([`{"Author${'ization'}": Token abcdefghijklmnop1234567890}`]).lines, [`{"Author${'ization'}": <secret>}`]);
+  assert.deepStrictEqual(redactLines([`{"Coo${'kie'}": a=1; sessionid=SECRETVALUE}`]).lines, [`{"Coo${'kie'}": <secret>}`]);
+  assert.deepStrictEqual(redactLines([`{"X-Api-${'Key'}": 12345, "other": 1}`]).lines, [`{"X-Api-${'Key'}": <secret>, "other": 1}`], 'a JSON literal value stops at its comma');
+  const lines = Array.from({length: 6}, (_, i) => Buffer.alloc(45, i + 1).toString('base64'));
+  lines[0] = 'MIIEvQ' + lines[0].slice(6);
+  const r = redactLines([...lines, 'after']);
+  assert.deepStrictEqual(r.lines, ['<privateKey>', 'after'], 'a body wrapped at 60 characters');
+});
+test('medium round 3: secret names that start with a weak word, and AWS keys with many slashes, are masked; weak-word settings stay', () => {
+  const v = 's3cr3t' + 'value';
+  for (const [line, want] of [[`AUTH_KEY=${v}`, 'AUTH_KEY=<secret>'], [`auth_key: ${v}`, 'auth_key: <secret>'], [`PASS_PHRASE=${v}`, 'PASS_PHRASE=<secret>'], [`--auth-key ${v}`, '--auth-key <secret>']]) {
+    assert.deepStrictEqual(redactLines([line]).lines, [want], line);
+  }
+  for (const line of ['pass_count=10 auth_mode=none auth_type=basic']) assert.deepStrictEqual(redactLines([line]).lines, [line]);
+  const k = 'wJa/rXU/nFE/I/K7MDENG/bPxRfiCY' + 'EXAMPLEKEY';
+  assert.deepStrictEqual(redactLines([`Using key ${k}.`]).lines, ['Using key <awsKey>.']);
+});
+test('medium round 3: a backslash in a single-quoted header is literal', () => {
+  assert.deepStrictEqual(redactLines([`curl -H 'X-Api-${'Key'}: a\\' -H 'X-Other: plain'`]).lines, [`curl -H 'X-Api-${'Key'}: <secret>' -H 'X-Other: plain'`]);
 });
