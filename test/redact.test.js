@@ -777,3 +777,38 @@ test('F6b: after a marker the prose exemption keeps only an unquoted value', () 
   const r = redactLines([`##[debug]secret: "${FAKE} more words"`, `##[debug]token: '${FAKE} x'`]);
   assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
 });
+
+test('F6a medium: a bracketed value never ends short: more after its close, mismatched brackets, an escaped backslash before a close', () => {
+  const lines = [
+    `password=[ab]${FAKE}`,
+    `login --password [x]${FAKE}`,
+    `password: {x} ${FAKE} more`,
+    `{"password": ["a" } , "${FAKE}" ]}`,
+    `"password": [a} ${FAKE}]`,
+    `{\\"password\\":[\\"a\\\\\\\\\\",\\"x ] ${FAKE}\\"]}`
+  ];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
+
+test('F6b medium: after a marker a bracketed value is no prose', () => {
+  const r = redactLines([`##[debug]token: ["${FAKE} more"]`, `##[debug]secret: [${FAKE} x]`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
+
+test('F6a medium: kept names with many bracket openers stay linear; a bracketed tag is not counted again', () => {
+  for (const unit of ['pass_mode=["a" ', '{"pass_mode":[', '{pass_mode:[']) {
+    const t = Date.now();
+    redactLines([unit.repeat(Math.floor(19000 / unit.length))]);
+    assert.ok(Date.now() - t < 200, `${unit}: ${Date.now() - t} ms`);
+  }
+  const r = redactLines([`token=[${GHP}]`]);
+  assert.strictEqual(r.lines[0], 'token=[<githubToken>]');
+  assert.strictEqual(r.counts.secret, 0);
+});
+
+test('F6a medium: an inner string\'s own escaped quote (\\\\\\" at the escaped level) never closes it', () => {
+  const r = redactLines([`Error: body {\\"secret\\":{\\"inner\\":\\"a\\\\\\"_} ${FAKE}=]}\\"}}`, `Error: body {\\"api_key\\":[\\"b\\\\\\"] '${FAKE};\\"],\\"n\\":1}`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  assert.ok(r.lines[1].endsWith(',\\"n\\":1}'), r.lines[1]);
+});
