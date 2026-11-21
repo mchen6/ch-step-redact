@@ -358,3 +358,28 @@ test('secrets under the names and forms the reviewer listed are masked; their lo
     assert.deepStrictEqual(redactLines([line]).lines, [line], line);
   }
 });
+
+// The reviewer's high, 4 (missed shapes). Built at run time.
+test('the token shapes the reviewer listed are masked, each under its type; a commit SHA is not', () => {
+  const A = 'aB3dE5gH7jK9mN1pQ2rS4tU6vW8xY0zA1b2C';
+  const hex40 = '0123456789abcdef'.repeat(3).slice(0, 40);
+  const cases = [
+    [`push with glpat-${'abcdefghij0123456789'}`, 'push with <apiKey>', 'apiKey'],
+    [`key sk-ant-api03-${A}${A}`, 'key <apiKey>', 'apiKey'],
+    [`key sk-proj-${A}${A}`, 'key <apiKey>', 'apiKey'],
+    [`key sk-${A}x`, 'key <apiKey>', 'apiKey'],
+    [`posting to https://hooks.slack.com/services/T${'00000000'}/B${'00000000'}/${'X'.repeat(24)}`, 'posting to <apiKey>', 'apiKey'],
+    [`using token ${hex40}`, 'using token <githubToken>', 'githubToken'],
+    [`installation v1.${hex40}`, 'installation <githubToken>', 'githubToken'],
+    [`key wJalrXUtnFEMI/K7MDENG/bPxRfiCY${'EXAMPLEKEY'}`, 'key <awsKey>', 'awsKey'],
+    [`MIIEowIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7${'MaskedBody'}`, '<privateKey>', 'privateKey']
+  ];
+  for (const [line, want, type] of cases) {
+    const r = redactLines([line]);
+    assert.deepStrictEqual(r.lines, [want], line);
+    assert.strictEqual(r.counts[type], 1, `${line}: one ${type}`);
+  }
+  for (const line of [`commit ${hex40}`, `HEAD is now at ${hex40.slice(0, 7)} msg`, 'desk-top sk-1 short', 'MIIFDA']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+});
