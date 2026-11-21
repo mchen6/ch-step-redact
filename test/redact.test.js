@@ -608,3 +608,28 @@ test('A-redact-2: a tail after a tag is kept only as a URL host', () => {
     assert.deepStrictEqual(redactLines([`x-access-token:${GH}@${host}`]).lines, [`x-access-token:<githubToken>@${host}`], host);
   }
 });
+
+// The medium on A-redact-2: its regression, the new forms' leaks, and their
+// over-masks. Built at run time.
+test('A-redact-2 medium: a value with no ASCII letter or digit is still a secret; the new forms mask what they meant to', () => {
+  const pw = 'pass' + 'word';
+  const leak = [`${pw}=пароль密码`, `DB_PASS${'WORD'}=!@#$%^&*`, `export API_TOKEN="€€€€"`,
+    `echo "${pw}: hunter2S3"`, `config(${pw}: hunter2S3)`, `echo ${pw}:hunter2S3`, 'echo passphrase: correct horse battery S3', 
+    'sshpass -pS3cretPw ssh user@host', 'docker login -u bot -p -XS3cret registry',
+    'curl --user=admin:S3cret', 'curl -uadmin:S3cret', 'curl -u :S3cretonly', 'curl -u "admin:pa ss S3word"',
+    `curl -H 'X-Auth-Token: a\\'b\\'S3'`, '?sv=2022&SIG=AbCS3dEf', '?sv=2022%26sig%3DAbCS3dEf', 'doo_v1_' + 'S3' + 'ab12'.repeat(16), 'dor_v1_' + 'S3' + 'ab12'.repeat(16)];
+  for (const line of leak) {
+    const out = redactLines([line]).lines[0];
+    assert.ok(!/S3|пароль|!@#\$|€/.test(out), `${line} -> ${out}`);
+  }
+});
+test('A-redact-2 medium: what triage needs stays', () => {
+  for (const line of ['docker run -p 3306:3306 --name db mysql', 'mysql -u root -p mydb', 'docker run --user 1001:121 node:22 npm test',
+    'Error: Missing header, Authorization: required for /api/v1/runs (status 401, run 42)', 'Tests: 3 passed, cookie: jar loaded, retries 2',
+    '--authorization-mode=Node,RBAC', 'authorization_endpoint=https://x.invalid/auth', 'max-tokens=16384', 'tokens_used=1500', 'secrets: inherit',
+    'master_key_rotation_enabled=true']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+  // (sshpass's own -p, not ssh's port after it)
+  assert.deepStrictEqual(redactLines(['sshpass -p S3cretX ssh -p 2222 host']).lines, ['sshpass -p <secret> ssh -p 2222 host']);
+});
