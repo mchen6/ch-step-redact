@@ -646,3 +646,63 @@ test('A-redact-2 medium: what triage needs stays', () => {
   // (sshpass's own -p, not ssh's port after it)
   assert.deepStrictEqual(redactLines([['sshpass', '-p', 'S3' + lowBody(6), 'ssh -p 2222 host'].join(' ')]).lines, ['sshpass -p <secret> ssh -p 2222 host']);
 });
+
+// The reviewer's pre-work high on pack 1 (R1, R2): built at run time, a value
+// plainly fake.
+const FAKE = ['FAKE', 'value', 'ZZ9'].join('-');
+const leaked = (lines) => lines.filter((l) => l.includes('FAKE'));
+
+test('R1: a secret name inside escaped JSON (\\"name\\":\\"value\\") is masked, its value whole', () => {
+  const lines = [
+    `AssertionError: expected response "{\\"access_token\\":\\"${FAKE}\\",\\"expires_in\\":3599}" to equal ...`,
+    `panic: unexpected body "{\\"refresh_token\\":\\"${FAKE}\\"}"`,
+    `    Expected: "{\\"password\\":\\"${FAKE}\\"}"`,
+    `Error: request failed with body {\\"api_key\\":\\"${FAKE}\\"}`,
+    `TypeError: bad payload "{\\"client_secret\\":\\"${FAKE}\\"}"`,
+    `{"level":50,"time":1,"pid":1,"msg":"token exchange failed: {\\"access_token\\":\\"${FAKE}\\"}"}`,
+    // a single-quoted escape too
+    `Error: {\\'api_key\\':\\'${FAKE}\\'}`
+  ];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  // (the rest of the line stays: the field after it, and the quotes)
+  assert.ok(r.lines[0].includes('\\"access_token\\":\\"<secret>\\",\\"expires_in\\":3599'), r.lines[0]);
+  assert.strictEqual(r.lines[2], '    Expected: "{\\"password\\":\\"<secret>\\"}"');
+});
+
+test('R1: an escaped quoted value is masked whole, not its first word', () => {
+  const words = ['FAKE', 'two', 'three'].join(' ');
+  const lines = [
+    `{"level":50,"time":1,"msg":"login failed password=\\"${words}\\""}`,
+    `Error: {"cmd":"login --password \\"${words}\\""}`
+  ];
+  const r = redactLines(lines);
+  for (const l of r.lines) assert.ok(!/FAKE|two|three/.test(l), l);
+  assert.ok(r.lines[0].includes('password=\\"<secret>\\"'), r.lines[0]);
+  assert.ok(r.lines[1].includes('--password \\"<secret>\\"'), r.lines[1]);
+});
+
+test('R1: an escape inside a real JSON string still ends at its own quote', () => {
+  const r = redactLines([`{"password":"${FAKE}\\"tail","user":"kept"}`]);
+  assert.strictEqual(r.lines[0], '{"password":"<secret>","user":"kept"}');
+});
+
+test('R2: a GitHub Actions marker at the line\'s start is the line\'s start for every anchored rule', () => {
+  const lines = [
+    `##[error]password: ${FAKE}`,
+    `##[error]api_key: ${FAKE}`,
+    `##[warning]X-Api-Key: ${FAKE}`,
+    `##[debug]password: ${FAKE}`,
+    `##[debug]X-Auth-Token: ${FAKE}`,
+    `##[notice]Cookie: session=${FAKE}`,
+    `##[command]mysql -uroot -p${FAKE} app`,
+    `##[command]/usr/bin/mysql -uroot -p${FAKE} app`
+  ];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  // (the marker kept)
+  assert.strictEqual(r.lines[0], '##[error]password: <secret>');
+  assert.strictEqual(r.lines[6], '##[command]mysql -uroot -p<secret> app');
+  // (a marker is no secret, and text after one is triage's as before)
+  assert.deepStrictEqual(redactLines(['##[error]Process completed with exit code 1.']).lines, ['##[error]Process completed with exit code 1.']);
+});
