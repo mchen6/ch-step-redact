@@ -706,3 +706,35 @@ test('R2: a GitHub Actions marker at the line\'s start is the line\'s start for 
   // (a marker is no secret, and text after one is triage's as before)
   assert.deepStrictEqual(redactLines(['##[error]Process completed with exit code 1.']).lines, ['##[error]Process completed with exit code 1.']);
 });
+
+test('R1 medium: an escaped quoted value with more after it is masked to the line\'s end, never to its first close', () => {
+  const lines = [
+    `password=\\"abc\\"${FAKE}`,
+    `--password \\'pa\\'${FAKE}`,
+    `api_key: \\"\\" ${FAKE}`,
+    `echo password: \\"a\\" ${FAKE}`,
+    // (an escaped quote inside the escaped value: \\\\\\" is the inner string's own)
+    `{\\"password\\":\\"ab\\\\\\"cd ${FAKE}\\"}`
+  ];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  assert.strictEqual(r.lines[4], '{\\"password\\":\\"<secret>\\"}');
+});
+
+test('R1 medium: a header name inside escaped JSON is a header', () => {
+  const tok = ['tok', 'en'].join('');
+  const r = redactLines([`{\\"Authorization\\":\\"${tok} ${FAKE}\\"}`, `{\\"Cookie\\":\\"sid=${FAKE}\\"}`, `{\\"X-Api-Key\\":\\"${FAKE}\\",\\"n\\":1}`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  assert.strictEqual(r.lines[2], '{\\"X-Api-Key\\":\\"<secret>\\",\\"n\\":1}');
+});
+
+test('R2 medium: after a marker, a bare Token: or Secret: is error text, as mid-line; key bodies after markers are masked', () => {
+  const kept = ['##[error]Token: expired, run gh auth login', '##[error]Secret: MY_KEY is not set in this repository'];
+  assert.deepStrictEqual(redactLines(kept).lines, kept);
+  // (a key body printed by debug logging, a marker on every line)
+  const body = ['abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/', 'zyxwvuQ9=='];
+  const lines = ['##[debug]M' + 'IIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7', ...body.map((b) => `##[debug]${b}`), '##[debug]done'];
+  const r = redactLines(lines);
+  for (const b of body) assert.ok(!r.lines.some((l) => l.includes(b.slice(0, 20))), JSON.stringify(r.lines));
+  assert.deepStrictEqual(r.lines, ['##[debug]<privateKey>', '##[debug]done']);
+});
