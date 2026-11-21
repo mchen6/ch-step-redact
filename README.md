@@ -6,8 +6,9 @@ countinghouse step module: masks the secrets and personal data its rules recogni
 8.0 or later (unreleased; the release that carries the remote client and
 local mode). A step module of the countinghouse client packs: a `part`, loaded by a scenario and never listed to the model on its own.
 
-Part of the countinghouse client packs. Each package has its own repository; the family's design and plan are in
-[ch-packs](https://github.com/mchen6/ch-packs) (public).
+Part of the countinghouse client packs. Each package has its own repository. The family's design and plan are in
+[ch-packs](https://github.com/mchen6/ch-packs) (public); the end-to-end acceptance test, which installs every package and calls the
+tool, runs in [ch-local](https://github.com/mchen6/ch-local)'s CI.
 
 ## Development
 
@@ -17,8 +18,8 @@ npm test
 npm run validate   # packs the module and runs countinghouse-validate on the tarball
 ```
 
-Pure JavaScript, no native module. Node 22.16 or later. CI runs on Linux,
-macOS and Windows.
+Pure JavaScript, no native module. Node 22.16 or later, as countinghouse. CI
+runs Node 24 on Linux, macOS and Windows.
 
 ## Publishing
 
