@@ -453,3 +453,36 @@ test('medium (round 2): a comparison is not an assignment; a key with a long run
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   assert.ok(ms < 2000, `50 lines of "token:" and spaces took ${ms.toFixed(0)} ms`);
 });
+
+// The medium's second round: its leaks (three of them regressions of the
+// first fix round) and its over-masks. Built at run time.
+test('medium round 2: AWS keys at a sentence\'s end, after =, or starting with / or + are masked; a path is not', () => {
+  const k = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCY' + 'EXAMPLEKEY';
+  for (const [line, want] of [[`Using key ${k}.`, 'Using key <awsKey>.'], [`key +${k.slice(1)} end`, 'key <awsKey> end'],
+    [`key /${k.slice(1)} end`, 'key <awsKey> end'], [`MYVAR=${k}`, 'MYVAR=<awsKey>']]) {
+    assert.deepStrictEqual(redactLines([line]).lines, [want], line);
+  }
+  for (const line of ['fatal /home/runner/work/MyRepo22/MyRepo22/srcA.ts:3', 'at /home/runner/work/MyRepo2/MyRepo2/src/AbcDefGh.js:10']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+});
+test('medium round 2: mysql -p runs to whitespace; a long quoted value is masked whole; header quotes honour escapes; a timestamped curl -v header', () => {
+  const ck = 'Coo' + 'kie';
+  for (const [line, want] of [
+    ['mysql -u root -pab"cd', 'mysql -u root -p<secret>'],
+    [`secret="${'x'.repeat(4100)}TAILSECRET"`, 'secret="<secret>"'],
+    [`{"${ck}": "a=b\\"; session=SECRETVAL"}`, `{"${ck}": "<secret>"}`],
+    [`2026-11-20T10:00:00.1234567Z > ${ck}: session=abc123`, `2026-11-20T10:00:00.1234567Z > ${ck}: <secret>`],
+    [`{"X-Api-${'Key'}": abc, "other": 1}`, `{"X-Api-${'Key'}": <secret>, "other": 1}`],
+    [`{"pass${'word'}": "ab\\\\"}`, `{"pass${'word'}": "<secret>"}`]
+  ]) assert.deepStrictEqual(redactLines([line]).lines, [want], line.slice(0, 80));
+});
+test('medium round 2: a YAML block indicator is no value; a bare key body ends before ordinary short lines; weak names keep their tallies and settings', () => {
+  const r = redactLines([`pass${'word'}: |`]);
+  assert.deepStrictEqual([r.lines, r.counts.secret], [[`pass${'word'}: |`], 0]);
+  const body = 'MIIEvQ' + Buffer.alloc(45, 3).toString('base64');
+  assert.deepStrictEqual(redactLines([body, 'abc123DEF', 'Error', 'Done', '200']).lines, ['<privateKey>', 'abc123DEF', 'Error', 'Done', '200']);
+  for (const line of ['  pass: 10   ', 'pass_count=10 auth_mode=none auth_type=basic', 'git push --no-auth origin']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+});
