@@ -536,3 +536,20 @@ test('medium round 4: a JSON literal stops a value only before , } ] or the end;
   assert.deepStrictEqual(redactLines([`AUTH_HEADER="ApiKey s3cr3tvaluehere"`]).lines, ['AUTH_HEADER="<secret>"']);
   assert.deepStrictEqual(redactLines([`auth_user=admin:s3cr3tpw`]).lines, ['auth_user=<secret>']);
 });
+
+// The reviewer's re-probe of #4, 1: a name skipped as a setting, a tally or a
+// block indicator consumed its whole value; a value opening a quote that
+// never closes swallowed the rest of the line, and a secret after it passed.
+// A skip consumes only the name and its = or :, so the scan goes on.
+test('a skipped name never swallows the secret after it', () => {
+  const v = 'S3CRT' + 'value';
+  for (const [line, want] of [
+    [`auth_mode="x pass${'word'}=${v}`, `auth_mode="x pass${'word'}=<secret>`],
+    [`pass=10 "unclosed pass${'word'}=${v}`, `pass=10 "unclosed pass${'word'}=<secret>`],
+    [`--auth-mode "x --pass${'word'} ${v}`, `--auth-mode "x --pass${'word'} <secret>`]
+  ]) assert.deepStrictEqual(redactLines([line]).lines, [want], line);
+});
+test('ch-step-redact exports its private key markers, for ch-step-log-clean to match', () => {
+  const {KEY_BEGIN, KEY_END} = require('../lib/rules');
+  assert.ok(KEY_BEGIN instanceof RegExp && KEY_END instanceof RegExp);
+});
