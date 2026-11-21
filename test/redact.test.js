@@ -646,3 +646,191 @@ test('A-redact-2 medium: what triage needs stays', () => {
   // (sshpass's own -p, not ssh's port after it)
   assert.deepStrictEqual(redactLines([['sshpass', '-p', 'S3' + lowBody(6), 'ssh -p 2222 host'].join(' ')]).lines, ['sshpass -p <secret> ssh -p 2222 host']);
 });
+
+// The reviewer's pre-work high on pack 1 (R1, R2): built at run time, a value
+// plainly fake.
+const FAKE = ['FAKE', 'value', 'ZZ9'].join('-');
+const leaked = (lines) => lines.filter((l) => l.includes('FAKE'));
+
+test('R1: a secret name inside escaped JSON (\\"name\\":\\"value\\") is masked, its value whole', () => {
+  const lines = [
+    `AssertionError: expected response "{\\"access_token\\":\\"${FAKE}\\",\\"expires_in\\":3599}" to equal ...`,
+    `panic: unexpected body "{\\"refresh_token\\":\\"${FAKE}\\"}"`,
+    `    Expected: "{\\"password\\":\\"${FAKE}\\"}"`,
+    `Error: request failed with body {\\"api_key\\":\\"${FAKE}\\"}`,
+    `TypeError: bad payload "{\\"client_secret\\":\\"${FAKE}\\"}"`,
+    `{"level":50,"time":1,"pid":1,"msg":"token exchange failed: {\\"access_token\\":\\"${FAKE}\\"}"}`,
+    // a single-quoted escape too
+    `Error: {\\'api_key\\':\\'${FAKE}\\'}`
+  ];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  // (the rest of the line stays: the field after it, and the quotes)
+  assert.ok(r.lines[0].includes('\\"access_token\\":\\"<secret>\\",\\"expires_in\\":3599'), r.lines[0]);
+  assert.strictEqual(r.lines[2], '    Expected: "{\\"password\\":\\"<secret>\\"}"');
+});
+
+test('R1: an escaped quoted value is masked whole, not its first word', () => {
+  const words = ['FAKE', 'two', 'three'].join(' ');
+  const lines = [
+    `{"level":50,"time":1,"msg":"login failed password=\\"${words}\\""}`,
+    `Error: {"cmd":"login --password \\"${words}\\""}`
+  ];
+  const r = redactLines(lines);
+  for (const l of r.lines) assert.ok(!/FAKE|two|three/.test(l), l);
+  assert.ok(r.lines[0].includes('password=\\"<secret>\\"'), r.lines[0]);
+  assert.ok(r.lines[1].includes('--password \\"<secret>\\"'), r.lines[1]);
+});
+
+test('R1: an escape inside a real JSON string still ends at its own quote', () => {
+  const r = redactLines([`{"password":"${FAKE}\\"tail","user":"kept"}`]);
+  assert.strictEqual(r.lines[0], '{"password":"<secret>","user":"kept"}');
+});
+
+test('R2: a GitHub Actions marker at the line\'s start is the line\'s start for every anchored rule', () => {
+  const lines = [
+    `##[error]password: ${FAKE}`,
+    `##[error]api_key: ${FAKE}`,
+    `##[warning]X-Api-Key: ${FAKE}`,
+    `##[debug]password: ${FAKE}`,
+    `##[debug]X-Auth-Token: ${FAKE}`,
+    `##[notice]Cookie: session=${FAKE}`,
+    `##[command]mysql -uroot -p${FAKE} app`,
+    `##[command]/usr/bin/mysql -uroot -p${FAKE} app`
+  ];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  // (the marker kept)
+  assert.strictEqual(r.lines[0], '##[error]password: <secret>');
+  assert.strictEqual(r.lines[6], '##[command]mysql -uroot -p<secret> app');
+  // (a marker is no secret, and text after one is triage's as before)
+  assert.deepStrictEqual(redactLines(['##[error]Process completed with exit code 1.']).lines, ['##[error]Process completed with exit code 1.']);
+});
+
+test('R1 medium: an escaped quoted value with more after it is masked to the line\'s end, never to its first close', () => {
+  const lines = [
+    `password=\\"abc\\"${FAKE}`,
+    `--password \\'pa\\'${FAKE}`,
+    `api_key: \\"\\" ${FAKE}`,
+    `echo password: \\"a\\" ${FAKE}`,
+    // (an escaped quote inside the escaped value: \\\\\\" is the inner string's own)
+    `{\\"password\\":\\"ab\\\\\\"cd ${FAKE}\\"}`
+  ];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  assert.strictEqual(r.lines[4], '{\\"password\\":\\"<secret>\\"}');
+});
+
+test('R1 medium: a header name inside escaped JSON is a header', () => {
+  const tok = ['tok', 'en'].join('');
+  const r = redactLines([`{\\"Authorization\\":\\"${tok} ${FAKE}\\"}`, `{\\"Cookie\\":\\"sid=${FAKE}\\"}`, `{\\"X-Api-Key\\":\\"${FAKE}\\",\\"n\\":1}`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  assert.strictEqual(r.lines[2], '{\\"X-Api-Key\\":\\"<secret>\\",\\"n\\":1}');
+});
+
+test('R2 medium: after a marker, a bare Token: or Secret: is error text, as mid-line; key bodies after markers are masked', () => {
+  const kept = ['##[error]Token: expired, run gh auth login', '##[error]Secret: MY_KEY is not set in this repository'];
+  assert.deepStrictEqual(redactLines(kept).lines, kept);
+  // (a key body printed by debug logging, a marker on every line)
+  const body = ['abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/', 'zyxwvuQ9=='];
+  const lines = ['##[debug]M' + 'IIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7', ...body.map((b) => `##[debug]${b}`), '##[debug]done'];
+  const r = redactLines(lines);
+  for (const b of body) assert.ok(!r.lines.some((l) => l.includes(b.slice(0, 20))), JSON.stringify(r.lines));
+  assert.deepStrictEqual(r.lines, ['##[debug]<privateKey>', '##[debug]done']);
+});
+
+test('R2 medium 2: after a marker, a bare token or secret with a one-word value is still a secret; prose stays', () => {
+  const r = redactLines([`##[debug]token: ${FAKE}`, `##[warning]Credentials: deploy:${FAKE}`, `##[debug]secret: ${FAKE}`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  const prose = ['##[error]Token: expired, run gh auth login', '##[error]Secret: MY_KEY is not set in this repository'];
+  assert.deepStrictEqual(redactLines(prose).lines, prose);
+});
+
+test('R1 medium 2: a header value in escaped quotes closes only where a value can end', () => {
+  const r = redactLines([`{\\"Cookie\\":\\"a\\"sid=${FAKE}\\"}`, `msg="headers { Cookie: \\"sid=${FAKE}\\" }"`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
+
+// The reviewer's high on #11 (F4, F6).
+test('F4: a secret flag with = and spaces masks its value, not the =', () => {
+  const r = redactLines([`##[error]--password = ${FAKE}`, `login --password = ${FAKE}`, `login --token =${FAKE}`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
+
+test('F6a: a secret-named key with an array or object value is masked whole, plain or escaped', () => {
+  const two = `${FAKE} second ${FAKE}`;
+  const lines = [
+    `Error: body {"password": ["${two}"], "n": 1}`,
+    `Error: body {"api_key":{"inner":"${two}"},"user":"bob"}`,
+    `Error: body {\\"client_secret\\":[\\"${two}\\"],\\"n\\":1}`,
+    `Error: body {\\"token\\":{\\"inner\\":\\"a ] } ${two}\\"}}`,
+    `Error: body {"secret": [ "${two}" `
+  ];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  // (to its own close bracket: what follows stays)
+  assert.strictEqual(r.lines[0], 'Error: body {"password": <secret>, "n": 1}');
+  assert.ok(r.lines[1].endsWith(',"user":"bob"}'), r.lines[1]);
+});
+
+test('F6b: after a marker the prose exemption keeps only an unquoted value', () => {
+  const r = redactLines([`##[debug]secret: "${FAKE} more words"`, `##[debug]token: '${FAKE} x'`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
+
+test('F6a medium: a bracketed value never ends short: more after its close, mismatched brackets, an escaped backslash before a close', () => {
+  const lines = [
+    `password=[ab]${FAKE}`,
+    `login --password [x]${FAKE}`,
+    `password: {x} ${FAKE} more`,
+    `{"password": ["a" } , "${FAKE}" ]}`,
+    `"password": [a} ${FAKE}]`,
+    `{\\"password\\":[\\"a\\\\\\\\\\",\\"x ] ${FAKE}\\"]}`
+  ];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
+
+test('F6b medium: after a marker a bracketed value is no prose', () => {
+  const r = redactLines([`##[debug]token: ["${FAKE} more"]`, `##[debug]secret: [${FAKE} x]`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
+
+test('F6a medium: kept names with many bracket openers stay linear; a bracketed tag is not counted again', () => {
+  for (const unit of ['pass_mode=["a" ', '{"pass_mode":[', '{pass_mode:[']) {
+    const t = Date.now();
+    redactLines([unit.repeat(Math.floor(19000 / unit.length))]);
+    assert.ok(Date.now() - t < 200, `${unit}: ${Date.now() - t} ms`);
+  }
+  const r = redactLines([`token=[${GHP}]`]);
+  assert.strictEqual(r.lines[0], 'token=[<githubToken>]');
+  assert.strictEqual(r.counts.secret, 0);
+});
+
+test('F6a medium: an inner string\'s own escaped quote (\\\\\\" at the escaped level) never closes it', () => {
+  const r = redactLines([`Error: body {\\"secret\\":{\\"inner\\":\\"a\\\\\\"_} ${FAKE}=]}\\"}}`, `Error: body {\\"api_key\\":[\\"b\\\\\\"] '${FAKE};\\"],\\"n\\":1}`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  assert.ok(r.lines[1].endsWith(',\\"n\\":1}'), r.lines[1]);
+});
+
+test('F6a medium 2: a quote right after a bracket\'s close is no end; an unclosed bracket around a tag is masked', () => {
+  const lines = [`password=[x]" s3 ${FAKE}"`, `login --password [x]' a ${FAKE}'`, `{"secret": ["x", "y"]"${FAKE} q"}`, `password={"a":1}'s ${FAKE}'`, `token=[<githubToken>${FAKE}`];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
+
+test('basic-auth URL: a user part holding @, and a password holding /, are masked to the authority\'s last @', () => {
+  const pw = ['hunter', '2'].join('');
+  const lines = [`postgres://svc@corp.com:${pw}${FAKE}@db:5432/app`, `https://ci@corp.com:Passw0rd${FAKE}@localhost/x`, `https://u:pa/ss${FAKE}@host.com`];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  assert.strictEqual(r.lines[0], 'postgres://<basicAuth>@db:5432/app');
+  // (a port and a path with an @ after it is no password: the URL stays)
+  assert.deepStrictEqual(redactLines(['npm http fetch GET 200 https://registry.npmjs.org:443/@babel/core 12ms']).lines, ['npm http fetch GET 200 https://registry.npmjs.org:443/@babel/core 12ms']);
+});
+
+test('NAME_END: text ending in a secret\'s name, Bearer or Basic (for ch-step-log-clean)', () => {
+  const {NAME_END} = require('../lib/rules');
+  for (const t of ['--password', 'x Bearer', 'basic', 'DB_PASSWORD', 'api_key', 'auth', 'pwd', 'X-Auth-Token', 'credentials']) assert.ok(NAME_END.test(t), t);
+  for (const t of ['passwordless_mode_x', 'hello', 'tokenizer', 'abc123']) assert.ok(!NAME_END.test(t), t);
+});
