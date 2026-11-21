@@ -8,7 +8,7 @@
         "type": "object",
         "properties": {
           "lines": {
-            "title": "lines to mask; one over 20000 characters is cut to it first",
+            "title": "lines to mask; one over 20000 characters is omitted whole, replaced by (a line of N characters, omitted)",
             "type": "array",
             "items": {
               "type": "string"
