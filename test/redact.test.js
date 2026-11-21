@@ -738,3 +738,15 @@ test('R2 medium: after a marker, a bare Token: or Secret: is error text, as mid-
   for (const b of body) assert.ok(!r.lines.some((l) => l.includes(b.slice(0, 20))), JSON.stringify(r.lines));
   assert.deepStrictEqual(r.lines, ['##[debug]<privateKey>', '##[debug]done']);
 });
+
+test('R2 medium 2: after a marker, a bare token or secret with a one-word value is still a secret; prose stays', () => {
+  const r = redactLines([`##[debug]token: ${FAKE}`, `##[warning]Credentials: deploy:${FAKE}`, `##[debug]secret: ${FAKE}`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+  const prose = ['##[error]Token: expired, run gh auth login', '##[error]Secret: MY_KEY is not set in this repository'];
+  assert.deepStrictEqual(redactLines(prose).lines, prose);
+});
+
+test('R1 medium 2: a header value in escaped quotes closes only where a value can end', () => {
+  const r = redactLines([`{\\"Cookie\\":\\"a\\"sid=${FAKE}\\"}`, `msg="headers { Cookie: \\"sid=${FAKE}\\" }"`]);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
