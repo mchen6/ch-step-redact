@@ -285,3 +285,284 @@ for (const [label, secret, leak] of [
     assert.ok(!leak.test(out));
   });
 }
+
+// The reviewer's high, 1 (fail-open): a private-key block whose BEGIN line is
+// over IN_MAX characters. The line was omitted before the block was looked
+// for, so the body lines after it went through unmasked. Blocks are found on
+// the full lines, then long lines are omitted.
+test('a private key block whose BEGIN line is over IN_MAX characters: its body never passes', () => {
+  const {IN_MAX} = require('../lib/rules');
+  const long = 'x'.repeat(IN_MAX + 1) + BEGIN;
+  const r = redactLines([long, KEY_BODY, KEY_BODY, END + ' after']);
+  assert.ok(!r.lines.some((l) => l.includes(KEY_BODY)), JSON.stringify(r.lines));
+  assert.strictEqual(r.counts.privateKey, 1);
+  assert.deepStrictEqual(r.lines.slice(1), [], 'the block\'s lines are one line, with the long one');
+  // an END on a long line closes the block too
+  const r2 = redactLines([BEGIN, KEY_BODY, 'y'.repeat(IN_MAX + 1) + END, 'after ' + KEY_BODY.slice(0, 3)]);
+  assert.ok(!r2.lines.some((l) => l.includes(KEY_BODY)), JSON.stringify(r2.lines));
+  assert.strictEqual(r2.lines[r2.lines.length - 1], 'after MII', 'the block closed at the long line');
+});
+
+// The reviewer's high, 2 (partial): an unquoted value stopped at , ; " ',
+// leaving the tail in view while the count said masked, and a value starting
+// with < was left whole. An unquoted value runs to whitespace or the line's
+// end; a value left alone is one an earlier rule's tags make up entirely.
+test('an assigned secret is masked to the end of its value: no tail after , ; " \' and no untagged value starting with <', () => {
+  const name = 'DB_PASS' + 'WORD';
+  for (const sep of [';', ',', '"', "'"]) {
+    const r = redactLines([`${name}=abc${sep}s3cr3tTAIL next`]);
+    assert.deepStrictEqual(r.lines, [`${name}=<secret> next`], sep);
+    assert.strictEqual(r.counts.secret, 1);
+  }
+  const lt = redactLines([`${name}=<s3cr3tVALUE`]);
+  assert.deepStrictEqual(lt.lines, [`${name}=<secret>`]);
+  const ltq = redactLines([`${name}="<s3cr3tVALUE"`]);
+  assert.deepStrictEqual(ltq.lines, [`${name}="<secret>"`]);
+  // (a value an earlier rule already tagged stays, counted once)
+  const tagged = redactLines([`${name}=` + GHP]);
+  assert.deepStrictEqual(tagged.lines, [`${name}=<githubToken>`]);
+  assert.deepStrictEqual([tagged.counts.githubToken, tagged.counts.secret], [1, 0]);
+});
+
+// The reviewer's high, 3 (missed names). Values built at run time.
+test('secrets under the names and forms the reviewer listed are masked; their look-alikes are not', () => {
+  const v = 's3cr3t' + 'VALUEabc123';
+  const masked = [
+    [`{"access${'Token'}":"${v}"}`, `{"access${'Token'}":"<secret>"}`],
+    [`client${'Secret'}=${v}`, `client${'Secret'}=<secret>`],
+    [`api${'Token'}=${v}`, `api${'Token'}=<secret>`],
+    [`PGPASS${'WORD'}=${v} psql`, `PGPASS${'WORD'}=<secret> psql`],
+    [`MYSQL_${'PWD'}=${v}`, `MYSQL_${'PWD'}=<secret>`],
+    [`ACCESS${'TOKEN'}=${v}`, `ACCESS${'TOKEN'}=<secret>`],
+    [`db_pwd=${v}`, 'db_pwd=<secret>'],
+    [`pass=${v}`, 'pass=<secret>'],
+    [`auth=${v}`, 'auth=<secret>'],
+    [`credentials=${v}`, 'credentials=<secret>'],
+    [`private_${'key'}=${v}`, `private_${'key'}=<secret>`],
+    [`//npm.pkg.invalid/:_pass${'word'}=${v}`, `//npm.pkg.invalid/:_pass${'word'}=<secret>`],
+    [`//npm.pkg.invalid/:_auth=${v}`, '//npm.pkg.invalid/:_auth=<secret>'],
+    [`//npm.pkg.invalid/:_auth${'Token'}=${v}`, `//npm.pkg.invalid/:_auth${'Token'}=<secret>`],
+    [`docker login -u me --pass${'word'} ${v}`, `docker login -u me --pass${'word'} <secret>`],
+    [`mysql -uroot -p${v} db`, 'mysql -uroot -p<secret> db'],
+    [`curl -H "X-Api-${'Key'}: ${v}" https://x.invalid`, `curl -H "X-Api-${'Key'}: <secret>" https://x.invalid`],
+    [`curl -H "Author${'ization'}: ${v}xyz" https://x.invalid`, `curl -H "Author${'ization'}: <secret>" https://x.invalid`],
+    [`Set-Cookie: session=${v}; Path=/`, 'Set-Cookie: <secret>'],
+    [`Cookie: sid=${v}`, 'Cookie: <secret>']
+  ];
+  for (const [line, want] of masked) {
+    const r = redactLines([line]);
+    assert.deepStrictEqual(r.lines, [want], line);
+    assert.strictEqual(r.counts.secret, 1, `${line}: counted once`);
+  }
+  for (const line of ['max_tokens: 5', 'Unexpected token: )', 'bypass=1', 'author: someone', 'docker run -p 8080:80 img', 'docker run -p8080:80 img', 'tokens=3']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+});
+
+// The reviewer's high, 4 (missed shapes). Built at run time.
+test('the token shapes the reviewer listed are masked, each under its type; a commit SHA is not', () => {
+  const A = 'aB3dE5gH7jK9mN1pQ2rS4tU6vW8xY0zA1b2C';
+  const hex40 = '0123456789abcdef'.repeat(3).slice(0, 40);
+  const cases = [
+    [`push with glpat-${'abcdefghij0123456789'}`, 'push with <apiKey>', 'apiKey'],
+    [`key sk-ant-api03-${A}${A}`, 'key <apiKey>', 'apiKey'],
+    [`key sk-proj-${A}${A}`, 'key <apiKey>', 'apiKey'],
+    [`key sk-${A}x`, 'key <apiKey>', 'apiKey'],
+    [`posting to https://hooks.slack.com/services/T${'00000000'}/B${'00000000'}/${'X'.repeat(24)}`, 'posting to <apiKey>', 'apiKey'],
+    [`using token ${hex40}`, 'using token <githubToken>', 'githubToken'],
+    [`installation v1.${hex40}`, 'installation <githubToken>', 'githubToken'],
+    [`key wJalrXUtnFEMI/K7MDENG/bPxRfiCY${'EXAMPLEKEY'}`, 'key <awsKey>', 'awsKey'],
+    [`MIIEowIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7${'MaskedBody'}`, '<privateKey>', 'privateKey']
+  ];
+  for (const [line, want, type] of cases) {
+    const r = redactLines([line]);
+    assert.deepStrictEqual(r.lines, [want], line);
+    assert.strictEqual(r.counts[type], 1, `${line}: one ${type}`);
+  }
+  for (const line of [`commit ${hex40}`, `HEAD is now at ${hex40.slice(0, 7)} msg`, 'desk-top sk-1 short', 'MIIFDA']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+});
+
+// The medium on the reviewer's high (A-redact), its findings 1-9: each leak
+// it found masked, each over-mask it found left as it was. Built at run time.
+test('medium 1: a bare key body is masked through all its lines, not only the first', () => {
+  const b64 = (i) => Buffer.alloc(48, i).toString('base64');
+  const r = redactLines(['MIIEowIBAAKCAQEA' + b64(7).slice(16), b64(200), b64(90), 'abcd==', 'next']);
+  assert.deepStrictEqual(r.lines, ['<privateKey>', 'next']);
+  assert.strictEqual(r.counts.privateKey, 1);
+});
+test('medium 2: headers after curl -v\'s > and < marks, and JSON headers, are masked', () => {
+  const v = 's3cr3t' + 'VALUEabc123';
+  const basic = 'dXNl' + 'cjpwYXNz';
+  for (const [line, want] of [
+    [`> Cookie: sid=${v}`, '> Cookie: <secret>'],
+    [`< set-cookie: sid=${v}; Path=/`, '< set-cookie: <secret>'],
+    [`> X-Api-${'Key'}: ${v}`, `> X-Api-${'Key'}: <secret>`],
+    [`> Author${'ization'}: Basic ${basic}`, `> Author${'ization'}: <secret>`],
+    [`{"Author${'ization'}": "Basic ${basic}"}`, `{"Author${'ization'}": "<secret>"}`],
+    [`{"cookie":"sid=${v}"}`, '{"cookie":"<secret>"}']
+  ]) assert.deepStrictEqual(redactLines([line]).lines, [want], line);
+});
+test('medium 3, 4 and 5: quoted flag values, unterminated or escaped quotes, and a key\'s value with spaces are masked whole', () => {
+  const v = 's3cr3t' + 'VALUEabc123';
+  const pw = 'PASS' + 'WORD';
+  for (const [line, want] of [
+    [`docker login --pass${'word'} "${v}"`, `docker login --pass${'word'} "<secret>"`],
+    [`docker login --pass${'word'} '${v}'`, `docker login --pass${'word'} '<secret>'`],
+    [`export DB_${pw}="${v} more`, `export DB_${pw}="<secret>`],
+    [`DB_${pw}="ab\\"${v}TAIL"`, `DB_${pw}="<secret>"`],
+    [`pass${'word'}: correct horse ${v} staple`, `pass${'word'}: <secret>`],
+    [`mysql -uroot -p"my ${v}" db`, 'mysql -uroot -p"<secret>" db']
+  ]) {
+    const r = redactLines([line]);
+    assert.deepStrictEqual(r.lines, [want], line);
+    assert.strictEqual(r.counts.secret, 1, line);
+  }
+});
+test('medium 6 and 9b: a bare AWS secret key without / or + is masked; a Basic credential stays a bearerToken', () => {
+  const r = redactLines([`key wJalrXUtnFEMIK7MDENGbPxRfiCY12${'EXAMPLEKEY'}`]);
+  assert.deepStrictEqual([r.lines, r.counts.awsKey], [['key <awsKey>'], 1]);
+  const b = redactLines(['Basic ' + 'aB3/'.repeat(10)]);
+  assert.deepStrictEqual([b.lines, b.counts.bearerToken, b.counts.awsKey], [['<token>'], 1, 0]);
+});
+test('medium 7: an unquoted key in mid-line object syntax is masked', () => {
+  const v = 's3cr3t' + 'VALUEabc123';
+  assert.deepStrictEqual(redactLines([`{ user: 'bob', pass${'word'}: '${v}' }`]).lines, [`{ user: 'bob', pass${'word'}: '<secret>' }`]);
+  assert.deepStrictEqual(redactLines([`const cfg = {token: ${v}}`]).lines, ['const cfg = {token: <secret>}']);
+});
+test('medium 8: what triage needs stays: PWD, pass tallies, cache and primary keys, a token file\'s path, a path', () => {
+  for (const line of ['PWD=/home/runner/work/repo/repo', 'OLDPWD=/home/runner', 'tests pass=10 fail=2', 'cache-key: node-Linux-abc123', '  primary-key: id',
+    'reading --token-file /etc/app/tok', 'fatal /home/runner/work/MyRepo22/MyRepo22/srcA.ts:3']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+  assert.deepStrictEqual(redactLines(['mysql -uroot -pS3cret; next']).lines, ['mysql -uroot -p<secret>; next']);
+});
+test('medium 9a: a value an earlier tag starts has its tail masked too', () => {
+  const r = redactLines(['TOKEN=' + GHP + ':tail' + 's3cr3tVALUE']);
+  assert.deepStrictEqual(r.lines, ['TOKEN=<githubToken><secret>']);
+  assert.deepStrictEqual([r.counts.githubToken, r.counts.secret], [1, 1]);
+  assert.deepStrictEqual(redactLines(['x-access-token:' + GHP + '@github.com']).lines, ['x-access-token:<githubToken>@github.com'], 'a URL\'s host stays');
+});
+
+test('medium (round 2): a comparison is not an assignment; a key with a long run of spaces stays linear', () => {
+  assert.deepStrictEqual(redactLines([`if pass${'word'} == expected:`]).lines, [`if pass${'word'} == expected:`]);
+  const {IN_MAX} = require('../lib/rules');
+  const t0 = process.hrtime.bigint();
+  redactLines(Array(50).fill(('token: ' + ' '.repeat(IN_MAX)).slice(0, IN_MAX)));
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(ms < 2000, `50 lines of "token:" and spaces took ${ms.toFixed(0)} ms`);
+});
+
+// The medium's second round: its leaks (three of them regressions of the
+// first fix round) and its over-masks. Built at run time.
+test('medium round 2: AWS keys at a sentence\'s end, after =, or starting with / or + are masked; a path is not', () => {
+  const k = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCY' + 'EXAMPLEKEY';
+  for (const [line, want] of [[`Using key ${k}.`, 'Using key <awsKey>.'], [`key +${k.slice(1)} end`, 'key <awsKey> end'],
+    [`key /${k.slice(1)} end`, 'key <awsKey> end'], [`MYVAR=${k}`, 'MYVAR=<awsKey>']]) {
+    assert.deepStrictEqual(redactLines([line]).lines, [want], line);
+  }
+  for (const line of ['fatal /home/runner/work/MyRepo22/MyRepo22/srcA.ts:3', 'at /home/runner/work/MyRepo2/MyRepo2/src/AbcDefGh.js:10']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+});
+test('medium round 2: mysql -p runs to whitespace; a long quoted value is masked whole; header quotes honour escapes; a timestamped curl -v header', () => {
+  const ck = 'Coo' + 'kie';
+  for (const [line, want] of [
+    ['mysql -u root -pab"cd', 'mysql -u root -p<secret>'],
+    [`secret="${'x'.repeat(4100)}TAILSECRET"`, 'secret="<secret>"'],
+    [`{"${ck}": "a=b\\"; session=SECRETVAL"}`, `{"${ck}": "<secret>"}`],
+    [`2026-11-20T10:00:00.1234567Z > ${ck}: session=abc123`, `2026-11-20T10:00:00.1234567Z > ${ck}: <secret>`],
+    // (an unquoted value that is no JSON literal runs to the line's end: the
+    // medium's third round, fail closed)
+    [`{"X-Api-${'Key'}": abc, "other": 1}`, `{"X-Api-${'Key'}": <secret>}`],
+    [`{"pass${'word'}": "ab\\\\"}`, `{"pass${'word'}": "<secret>"}`]
+  ]) assert.deepStrictEqual(redactLines([line]).lines, [want], line.slice(0, 80));
+});
+test('medium round 2: a YAML block indicator is no value; a bare key body ends before ordinary short lines; weak names keep their tallies and settings', () => {
+  const r = redactLines([`pass${'word'}: |`]);
+  assert.deepStrictEqual([r.lines, r.counts.secret], [[`pass${'word'}: |`], 0]);
+  const body = 'MIIEvQ' + Buffer.alloc(45, 3).toString('base64');
+  assert.deepStrictEqual(redactLines([body, 'abc123DEF', 'Error', 'Done', '200']).lines, ['<privateKey>', 'abc123DEF', 'Error', 'Done', '200']);
+  for (const line of ['  pass: 10   ', 'pass_count=10 auth_mode=none auth_type=basic', 'git push --no-auth origin']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+});
+
+// The medium's third round: leaks the second round's narrowing opened
+// (fail closed where a leak and over-masking conflict). Built at run time.
+test('medium round 3: an Anthropic or OpenAI key whole; a JSON Authorization or Cookie value whole; a narrow-wrapped key body whole', () => {
+  const b = 'aB3dE5gH7jK9mN1pQ2rS4tU6vW8xY0zA1b2C3d4E';
+  assert.deepStrictEqual(redactLines([`key sk-ant-api03-ab_${b}-tailSECRETtailSECRETtail99AAz-AA`]).lines, ['key <apiKey>']);
+  assert.deepStrictEqual(redactLines([`{"Author${'ization'}": Token abcdefghijklmnop1234567890}`]).lines, [`{"Author${'ization'}": <secret>}`]);
+  assert.deepStrictEqual(redactLines([`{"Coo${'kie'}": a=1; sessionid=SECRETVALUE}`]).lines, [`{"Coo${'kie'}": <secret>}`]);
+  assert.deepStrictEqual(redactLines([`{"X-Api-${'Key'}": 12345, "other": 1}`]).lines, [`{"X-Api-${'Key'}": <secret>, "other": 1}`], 'a JSON literal value stops at its comma');
+  const lines = Array.from({length: 6}, (_, i) => Buffer.alloc(45, i + 1).toString('base64'));
+  lines[0] = 'MIIEvQ' + lines[0].slice(6);
+  const r = redactLines([...lines, 'after']);
+  assert.deepStrictEqual(r.lines, ['<privateKey>', 'after'], 'a body wrapped at 60 characters');
+});
+test('medium round 3: secret names that start with a weak word, and AWS keys with many slashes, are masked; weak-word settings stay', () => {
+  const v = 's3cr3t' + 'value';
+  for (const [line, want] of [[`AUTH_KEY=${v}`, 'AUTH_KEY=<secret>'], [`auth_key: ${v}`, 'auth_key: <secret>'], [`PASS_PHRASE=${v}`, 'PASS_PHRASE=<secret>'], [`--auth-key ${v}`, '--auth-key <secret>']]) {
+    assert.deepStrictEqual(redactLines([line]).lines, [want], line);
+  }
+  for (const line of ['pass_count=10 auth_mode=none auth_type=basic']) assert.deepStrictEqual(redactLines([line]).lines, [line]);
+  const k = 'wJa/rXU/nFE/I/K7MDENG/bPxRfiCY' + 'EXAMPLEKEY';
+  assert.deepStrictEqual(redactLines([`Using key ${k}.`]).lines, ['Using key <awsKey>.']);
+});
+test('medium round 3: a backslash in a single-quoted header is literal', () => {
+  assert.deepStrictEqual(redactLines([`curl -H 'X-Api-${'Key'}: a\\' -H 'X-Other: plain'`]).lines, [`curl -H 'X-Api-${'Key'}: <secret>' -H 'X-Other: plain'`]);
+});
+
+// The medium's fourth round: leaks the third round's boundaries opened, each
+// back to the widest safe form. Built at run time.
+test('medium round 4: an AWS key next to - or _ is masked; a body after a wide first line is masked; escaped single quotes outside a shell -H', () => {
+  const k = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCY' + 'EXAMPLEKEY';
+  for (const line of [`key-${k}`, `secret_${k}`, `${k}_old`, `x ${k}-`, `sk-svcacct-${k}-tail`]) {
+    assert.ok(!redactLines([line]).lines[0].includes(k), line);
+  }
+  const wide = 'MII' + Buffer.alloc(51, 9).toString('base64').slice(0, 67);
+  const rows = [1, 2, 3].map((i) => Buffer.alloc(48, i).toString('base64'));
+  assert.deepStrictEqual(redactLines([wide, ...rows, 'after']).lines, ['<privateKey>', 'after']);
+  const r = redactLines([`headers = {'Author${'ization'}': 'Bearer it\\'sAsecretvalue'}`]);
+  assert.ok(!r.lines[0].includes('sAsecretvalue'), r.lines[0]);
+});
+test('medium round 4: a JSON literal stops a value only before , } ] or the end; settings under weak names keep digits and booleans; AUTH_HEADER is a secret', () => {
+  const ck = 'Coo' + 'kie';
+  assert.deepStrictEqual(redactLines([`{"${ck}": 1 sessionid=abcdef123456}`]).lines, [`{"${ck}": <secret>}`]);
+  assert.deepStrictEqual(redactLines([`{"X-Api-${'Key'}": abc, "note": "x"}`]).lines, [`{"X-Api-${'Key'}": <secret>}`]);
+  for (const line of ['pass_num=5', 'auth_disabled=true']) assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  assert.deepStrictEqual(redactLines([`AUTH_HEADER="ApiKey s3cr3tvaluehere"`]).lines, ['AUTH_HEADER="<secret>"']);
+  assert.deepStrictEqual(redactLines([`auth_user=admin:s3cr3tpw`]).lines, ['auth_user=<secret>']);
+});
+
+// The reviewer's re-probe of #4, 1: a name skipped as a setting, a tally or a
+// block indicator consumed its whole value; a value opening a quote that
+// never closes swallowed the rest of the line, and a secret after it passed.
+// A skip consumes only the name and its = or :, so the scan goes on.
+test('a skipped name never swallows the secret after it', () => {
+  const v = 'S3CRT' + 'value';
+  for (const [line, want] of [
+    [`auth_mode="x pass${'word'}=${v}`, `auth_mode="x pass${'word'}=<secret>`],
+    [`pass=10 "unclosed pass${'word'}=${v}`, `pass=10 "unclosed pass${'word'}=<secret>`],
+    [`--auth-mode "x --pass${'word'} ${v}`, `--auth-mode "x --pass${'word'} <secret>`]
+  ]) assert.deepStrictEqual(redactLines([line]).lines, [want], line);
+});
+test('ch-step-redact exports its private key markers, for ch-step-log-clean to match', () => {
+  const {KEY_BEGIN, KEY_END} = require('../lib/rules');
+  assert.ok(KEY_BEGIN instanceof RegExp && KEY_END instanceof RegExp);
+});
+
+// The reviewer's re-probe of 6342ebc (round 4's skip for weak-word
+// settings): a name that holds a strong word, or ends in a secret's word, is
+// never skipped, and the skip is only for booleans and short numbers.
+test('a weak-word name that is a secret keeps its value masked, digits and all', () => {
+  const n = '8472619305' + '8472619305';
+  for (const line of [`AUTH_TOKEN=${n}`, `DB_AUTH_TOKEN=${n}`, `AUTH_SECRET=${n}`, `AUTH_PASS${'WORD'}=${n}`, `AUTH_API_KEY=${n}`,
+    `auth_key=${n}`, 'PASS_CODE=482913', 'pass_phrase=1234567890', 'auth-pin=0042', `"auth_token": ${n}`, `auth_token: ${n}`]) {
+    const out = redactLines([line]).lines[0];
+    assert.ok(!/\d{4}/.test(out), `${line} -> ${out}`);
+  }
+  for (const line of ['pass_num=5', 'auth_disabled=true', 'auth_retries=3', 'pass=10']) assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+});
