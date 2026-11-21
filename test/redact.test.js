@@ -511,8 +511,10 @@ test('medium round 3: secret names that start with a weak word, and AWS keys wit
   const k = 'wJa/rXU/nFE/I/K7MDENG/bPxRfiCY' + 'EXAMPLEKEY';
   assert.deepStrictEqual(redactLines([`Using key ${k}.`]).lines, ['Using key <awsKey>.']);
 });
-test('medium round 3: a backslash in a single-quoted header is literal', () => {
-  assert.deepStrictEqual(redactLines([`curl -H 'X-Api-${'Key'}: a\\' -H 'X-Other: plain'`]).lines, [`curl -H 'X-Api-${'Key'}: <secret>' -H 'X-Other: plain'`]);
+// (A-redact-2, the reviewer's leftover: a shell value ending in a backslash
+// before its quote now fails closed, to the next quote)
+test('medium round 3: a backslash in a single-quoted header ends nothing early: fails closed to the next quote', () => {
+  assert.deepStrictEqual(redactLines([`curl -H 'X-Api-${'Key'}: a\\' -H 'X-Other: plain'`]).lines, [`curl -H 'X-Api-${'Key'}: <secret>'X-Other: plain'`]);
 });
 
 // The medium's fourth round: leaks the third round's boundaries opened, each
@@ -565,4 +567,82 @@ test('a weak-word name that is a secret keeps its value masked, digits and all',
     assert.ok(!/\d{4}/.test(out), `${line} -> ${out}`);
   }
   for (const line of ['pass_num=5', 'auth_disabled=true', 'auth_retries=3', 'pass=10']) assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+});
+
+// (A-redact-2's values are assembled at run time from parts, so no source
+// line looks like a credential to a secret scanner: a user and its
+// password, a key's body)
+const userPass = (user, pass) => [user, pass].join(':');
+const lowBody = (n) => 'ab12'.repeat(Math.ceil(n / 4)).slice(0, n);
+// (a name and its value, joined in code: no literal in the source pairs a
+// secret-sounding name with a value)
+const kv = (name, sep, value) => [name, value].join(sep);
+
+// A-redact-2 (the reviewer's follow-up, release 1): the pattern additions
+// from the reviewer's boundary probe. Each case must lose its sentinel.
+test('A-redact-2: the forms and shapes the boundary probe found leaking are masked', () => {
+  const S = 'S3CRT' + 'value';
+  const A = lowBody(36);
+  const U = 'us' + 'er';
+  const cases = [
+    ['docker login', '-p', S].join(' '), ['sshpass', '-p', S, 'ssh x'].join(' '), ['curl', '-u', userPass(U, S), 'https://x.invalid'].join(' '),
+    ['curl', '--user', userPass(U, S), 'https://x.invalid'].join(' '),
+    `echo X-Api-${'Key'}: ${S}`, `{ Author${'ization'}: '${S}RawToken' }`, `author${'ization'}=${S}`, `echo config: pass${'word'}: ${S}`,
+    `tokens=${S}`, `secrets=${S}`, `passphrase=${S}`, `signing_key=${S}`, `access_key=${S}`, `encryption_key=${S}`, `master_key=${S}`,
+    'b3BlbnNzaC1rZXktdjE' + Buffer.alloc(36, 0x41).toString('base64') + S,
+    'hf_' + S + A, 'dop_' + 'v1_' + S + A + A, 'Account' + 'Key=' + S + A + A + '==',
+    ['Default' + 'EndpointsProtocol=https', 'AccountName=x', 'Account' + 'Key=' + S + A + '==', 'EndpointSuffix=core.windows.net'].join(';'),
+    'SharedAccess' + 'Signature=sv=2020&' + 'sig=' + S + A, 'https://x.invalid/?' + 'sig=' + S + '&se=2026'
+  ];
+  for (const line of cases) {
+    const out = redactLines([line]).lines[0];
+    assert.ok(!out.includes('S3CRT'), `${line} -> ${out}`);
+  }
+  // the reviewer's two leftovers from #4, failing closed
+  for (const line of [`curl -H 'X-Api-${'Key'}: abc\\' ${S}'`, `"X-Api-${'Key'}": 1e5, "x": "${S}"`]) {
+    const out = redactLines([line]).lines[0];
+    assert.ok(!out.includes('S3CRT'), `${line} -> ${out}`);
+  }
+  // what triage needs stays
+  for (const line of [kv('Invalid token', ': ', 'abc'), kv('missing secret', ': ', 'FOO'), kv('tokens', '=', '3'), kv('max_tokens', '=', 'KEEP'), kv('num_tokens', '=', 'KEEP'),
+    kv('Unexpected token', ': ', ') KEEP'), ['Cache', 'key:', ['node', 'cache', 'Linux', 'npm', '0123456789abcdef'].join('-'), 'KEEP'].join(' '), 'docker run -p 8080:80 img', 'Run actions/checkout@v4 KEEP']) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+});
+
+// The reviewer's ruling on A-redact-2: a tail after an earlier tag is kept
+// only when it looks like a URL's host; otherwise it is masked too.
+test('A-redact-2: a tail after a tag is kept only as a URL host', () => {
+  const r = redactLines([`pass${'word'}=<basicAuth>@S3CRT` + 'value']);
+  assert.ok(!r.lines[0].includes('S3CRT'), r.lines[0]);
+  const GH = 'ghp_' + 'a1B2'.repeat(9);
+  for (const host of ['github.com/o/r.git', 'github.com', 'localhost:8080/x', 'git.example.invalid:443']) {
+    assert.deepStrictEqual(redactLines([`x-access-token:${GH}@${host}`]).lines, [`x-access-token:<githubToken>@${host}`], host);
+  }
+});
+
+// The medium on A-redact-2: its regression, the new forms' leaks, and their
+// over-masks. Built at run time.
+test('A-redact-2 medium: a value with no ASCII letter or digit is still a secret; the new forms mask what they meant to', () => {
+  const pw = 'pass' + 'word';
+  const leak = [`${pw}=пароль密码`, `DB_PASS${'WORD'}=!@#$%^&*`, `export API_TOKEN="€€€€"`,
+    `echo "${pw}: hunter2S3"`, `config(${pw}: hunter2S3)`, `echo ${pw}:hunter2S3`, 'echo ' + kv('passphrase', ': ', 'correct horse battery S3'), 
+    'sshpass -p' + 'S3' + lowBody(8) + ' ssh host', ['docker login -u bot', '-p', '-X' + 'S3' + lowBody(6), 'registry'].join(' '),
+    'curl --user=' + userPass('adm' + 'in', 'S3' + lowBody(6)), 'curl -u' + userPass('adm' + 'in', 'S3' + lowBody(6)),
+    'curl -u ' + userPass('', 'S3' + lowBody(8)), 'curl -u "' + userPass('adm' + 'in', 'pa ss S3' + lowBody(4)) + '"',
+    "curl -H '" + kv('X-Auth-Token', ': ', "a\\'b\\'S3") + "'", '?sv=2022&' + kv('SIG', '=', 'S3' + lowBody(6)), '?sv=2022%26' + 'sig%3D' + 'S3' + lowBody(6), 'doo_' + 'v1_' + 'S3' + lowBody(64), 'dor_' + 'v1_' + 'S3' + lowBody(64)];
+  for (const line of leak) {
+    const out = redactLines([line]).lines[0];
+    assert.ok(!/S3|пароль|!@#\$|€/.test(out), `${line} -> ${out}`);
+  }
+});
+test('A-redact-2 medium: what triage needs stays', () => {
+  for (const line of ['docker run -p 3306:3306 --name db mysql', 'mysql -u root -p mydb', 'docker run --user 1001:121 node:22 npm test',
+    'Error: Missing header, ' + kv('Authorization', ': ', 'required for /api/v1/runs (status 401, run 42)'), 'Tests: 3 passed, ' + kv('cookie', ': ', 'jar loaded, retries 2'),
+    kv('--authorization-mode', '=', 'Node,RBAC'), kv('authorization_endpoint', '=', 'https://x.invalid/auth'), kv('max-tokens', '=', '16384'),
+    kv('tokens_used', '=', '1500'), kv('secrets', ': ', 'inherit'), kv('master_key_rotation_enabled', '=', 'true')]) {
+    assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  }
+  // (sshpass's own -p, not ssh's port after it)
+  assert.deepStrictEqual(redactLines([['sshpass', '-p', 'S3' + lowBody(6), 'ssh -p 2222 host'].join(' ')]).lines, ['sshpass -p <secret> ssh -p 2222 host']);
 });
