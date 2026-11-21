@@ -812,3 +812,9 @@ test('F6a medium: an inner string\'s own escaped quote (\\\\\\" at the escaped l
   assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
   assert.ok(r.lines[1].endsWith(',\\"n\\":1}'), r.lines[1]);
 });
+
+test('F6a medium 2: a quote right after a bracket\'s close is no end; an unclosed bracket around a tag is masked', () => {
+  const lines = [`password=[x]" s3 ${FAKE}"`, `login --password [x]' a ${FAKE}'`, `{"secret": ["x", "y"]"${FAKE} q"}`, `password={"a":1}'s ${FAKE}'`, `token=[<githubToken>${FAKE}`];
+  const r = redactLines(lines);
+  assert.deepStrictEqual(leaked(r.lines), [], JSON.stringify(r.lines));
+});
