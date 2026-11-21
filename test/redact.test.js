@@ -285,3 +285,20 @@ for (const [label, secret, leak] of [
     assert.ok(!leak.test(out));
   });
 }
+
+// The reviewer's high, 1 (fail-open): a private-key block whose BEGIN line is
+// over IN_MAX characters. The line was omitted before the block was looked
+// for, so the body lines after it went through unmasked. Blocks are found on
+// the full lines, then long lines are omitted.
+test('a private key block whose BEGIN line is over IN_MAX characters: its body never passes', () => {
+  const {IN_MAX} = require('../lib/rules');
+  const long = 'x'.repeat(IN_MAX + 1) + BEGIN;
+  const r = redactLines([long, KEY_BODY, KEY_BODY, END + ' after']);
+  assert.ok(!r.lines.some((l) => l.includes(KEY_BODY)), JSON.stringify(r.lines));
+  assert.strictEqual(r.counts.privateKey, 1);
+  assert.deepStrictEqual(r.lines.slice(1), [], 'the block\'s lines are one line, with the long one');
+  // an END on a long line closes the block too
+  const r2 = redactLines([BEGIN, KEY_BODY, 'y'.repeat(IN_MAX + 1) + END, 'after ' + KEY_BODY.slice(0, 3)]);
+  assert.ok(!r2.lines.some((l) => l.includes(KEY_BODY)), JSON.stringify(r2.lines));
+  assert.strictEqual(r2.lines[r2.lines.length - 1], 'after MII', 'the block closed at the long line');
+});
