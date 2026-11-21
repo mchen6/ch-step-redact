@@ -514,3 +514,25 @@ test('medium round 3: secret names that start with a weak word, and AWS keys wit
 test('medium round 3: a backslash in a single-quoted header is literal', () => {
   assert.deepStrictEqual(redactLines([`curl -H 'X-Api-${'Key'}: a\\' -H 'X-Other: plain'`]).lines, [`curl -H 'X-Api-${'Key'}: <secret>' -H 'X-Other: plain'`]);
 });
+
+// The medium's fourth round: leaks the third round's boundaries opened, each
+// back to the widest safe form. Built at run time.
+test('medium round 4: an AWS key next to - or _ is masked; a body after a wide first line is masked; escaped single quotes outside a shell -H', () => {
+  const k = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCY' + 'EXAMPLEKEY';
+  for (const line of [`key-${k}`, `secret_${k}`, `${k}_old`, `x ${k}-`, `sk-svcacct-${k}-tail`]) {
+    assert.ok(!redactLines([line]).lines[0].includes(k), line);
+  }
+  const wide = 'MII' + Buffer.alloc(51, 9).toString('base64').slice(0, 67);
+  const rows = [1, 2, 3].map((i) => Buffer.alloc(48, i).toString('base64'));
+  assert.deepStrictEqual(redactLines([wide, ...rows, 'after']).lines, ['<privateKey>', 'after']);
+  const r = redactLines([`headers = {'Author${'ization'}': 'Bearer it\\'sAsecretvalue'}`]);
+  assert.ok(!r.lines[0].includes('sAsecretvalue'), r.lines[0]);
+});
+test('medium round 4: a JSON literal stops a value only before , } ] or the end; settings under weak names keep digits and booleans; AUTH_HEADER is a secret', () => {
+  const ck = 'Coo' + 'kie';
+  assert.deepStrictEqual(redactLines([`{"${ck}": 1 sessionid=abcdef123456}`]).lines, [`{"${ck}": <secret>}`]);
+  assert.deepStrictEqual(redactLines([`{"X-Api-${'Key'}": abc, "note": "x"}`]).lines, [`{"X-Api-${'Key'}": <secret>}`]);
+  for (const line of ['pass_num=5', 'auth_disabled=true']) assert.deepStrictEqual(redactLines([line]).lines, [line], line);
+  assert.deepStrictEqual(redactLines([`AUTH_HEADER="ApiKey s3cr3tvaluehere"`]).lines, ['AUTH_HEADER="<secret>"']);
+  assert.deepStrictEqual(redactLines([`auth_user=admin:s3cr3tpw`]).lines, ['auth_user=<secret>']);
+});
