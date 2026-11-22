@@ -625,7 +625,7 @@ test('A-redact-2: a tail after a tag is kept only as a URL host', () => {
 // over-masks. Built at run time.
 test('A-redact-2 medium: a value with no ASCII letter or digit is still a secret; the new forms mask what they meant to', () => {
   const pw = 'pass' + 'word';
-  const leak = [`${pw}=пароль密码`, `DB_PASS${'WORD'}=!@#$%^&*`, `export API_TOKEN="€€€€"`,
+  const leak = [`${pw}=\u043f\u0430\u0440\u043e\u043b\u044c\u5bc6\u7801`, `DB_PASS${'WORD'}=!@#$%^&*`, `export API_TOKEN="\u20ac\u20ac\u20ac\u20ac"`,
     `echo "${pw}: hunter2S3"`, `config(${pw}: hunter2S3)`, `echo ${pw}:hunter2S3`, 'echo ' + kv('passphrase', ': ', 'correct horse battery S3'), 
     'sshpass -p' + 'S3' + lowBody(8) + ' ssh host', ['docker login -u bot', '-p', '-X' + 'S3' + lowBody(6), 'registry'].join(' '),
     'curl --user=' + userPass('adm' + 'in', 'S3' + lowBody(6)), 'curl -u' + userPass('adm' + 'in', 'S3' + lowBody(6)),
