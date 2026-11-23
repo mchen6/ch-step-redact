@@ -1,0 +1,1 @@
+- English only: everything this repo delivers or shows to users is in English, including code text, agent-facing prompts and skills, docs, READMEs, tests and fixtures, and packages. Input that must be in another script is written as `\u` escapes.
