@@ -26,8 +26,18 @@ Releases are published by `.github/workflows/publish.yml` under npm
 trusted publishing: a `v<version>` tag on a `main` commit whose
 package.json carries that version. No npm token exists anywhere and no 2FA
 code is typed for a release. One-time setup on npmjs.com, by the
-maintainer: the package's first version is published by hand (`npm publish
---access public`, with 2FA); then **Settings → Trusted publishing → GitHub
+maintainer: the package is first published by hand, as a placeholder: in an empty
+directory, a package.json holding only name, version "0.0.1-placeholder.0"
+and description "Placeholder for the first release; not for use. Install a
+released version.", then `npm publish --access public --tag placeholder`
+(2FA). The one-time placeholder publish uses a throwaway pre-release
+version (e.g. 0.0.1-placeholder.0) under a dist-tag other than latest
+(e.g. `--tag placeholder`), never the release's version; deprecate it once
+the real version is out. Then check `npm dist-tag ls <package>`: if
+`latest` names the placeholder, `npm install <package>` installs it until
+the real version is published (publishing the real version without
+`--tag` moves `latest` to it), so publish the real version before the
+package's name is given to anyone. Then **Settings → Trusted publishing → GitHub
 Actions** with owner `mchen6`, repository `ch-step-redact`, workflow
 `publish.yml`, allowing `npm publish` as well as `npm stage publish`;
 then **Settings → Publishing access → Require two-factor authentication
